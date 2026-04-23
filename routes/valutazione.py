@@ -123,11 +123,17 @@ def analizza_stream():
     """
     import sys
     print(f"=== ROUTE HIT: {request.path} ===", flush=True)
-    dati          = request.get_json()
-    testo_profilo = dati.get("testo_profilo", "").strip()
-    tipo_profilo  = dati.get("tipo_profilo", "A")
-    candidato_id  = dati.get("candidato_id")
-    print(f"=== STREAM PARAMS: tipo={tipo_profilo} candidato_id={candidato_id} linkedin_url={dati.get('linkedin_url')} testo_len={len(testo_profilo)} ===", flush=True)
+    dati              = request.get_json()
+    testo_profilo     = dati.get("testo_profilo", "").strip()
+    tipo_profilo      = dati.get("tipo_profilo", "A")
+    candidato_id      = dati.get("candidato_id")
+    punteggio_forzato = dati.get("punteggio_forzato")
+    if punteggio_forzato is not None:
+        try:
+            punteggio_forzato = int(punteggio_forzato)
+        except (TypeError, ValueError):
+            punteggio_forzato = None
+    print(f"=== STREAM PARAMS: tipo={tipo_profilo} candidato_id={candidato_id} linkedin_url={dati.get('linkedin_url')} punteggio_forzato={punteggio_forzato} testo_len={len(testo_profilo)} ===", flush=True)
 
     if not testo_profilo:
         def _err():
@@ -178,6 +184,7 @@ def analizza_stream():
             testo_profilo, tipo_profilo,
             linkedin_url=linkedin_url,
             dati_proxycurl_cached=dati_proxycurl_cached,
+            punteggio_forzato=punteggio_forzato,
         ):
             # Intercetta l'evento interno _proxycurl_data: salva in DB, non inviare al browser
             if '"_proxycurl_data"' in chunk:

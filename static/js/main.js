@@ -195,8 +195,10 @@ function chiudiModalReport() {
  * @param {Function} salvaCallback - function(dati) chiamata dopo analisi approfondita
  */
 function _mostraReportNelModal(dati, candidatoInfo, salvaCallback) {
-    // Salva contesto per eventuale analisi approfondita
-    _reportGlobale = candidatoInfo ? { candidatoInfo: candidatoInfo, salvaCallback: salvaCallback || null } : _reportGlobale;
+    // Salva contesto per eventuale analisi approfondita (incluso punteggio già calcolato)
+    _reportGlobale = candidatoInfo
+        ? { candidatoInfo: candidatoInfo, salvaCallback: salvaCallback || null, punteggio: dati.punteggio || null }
+        : _reportGlobale;
     var spinnerEl = document.getElementById('modal-report-spinner');
     var streamEl  = document.getElementById('modal-report-streaming');
     var bodyEl    = document.getElementById('modal-report-body');
@@ -357,9 +359,11 @@ function _lanciaAnalisiApprofondita() {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-            testo_profilo: ci.testo    || '',
-            tipo_profilo:  ci.tipo     || 'A',
-            linkedin_url:  ci.linkedin || null,
+            testo_profilo:     ci.testo    || '',
+            tipo_profilo:      ci.tipo     || 'A',
+            linkedin_url:      ci.linkedin || null,
+            candidato_id:      ci.candidato_id || null,
+            punteggio_forzato: _reportGlobale.punteggio || null,
         })
     })
     .then(function(response) {

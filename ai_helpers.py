@@ -273,6 +273,7 @@ def analizza_profilo_linkedin_stream(
     impostazioni: dict = None,
     linkedin_url: str = None,
     dati_proxycurl_cached: dict = None,
+    punteggio_forzato: int = None,
 ):
     """
     Versione streaming di analizza_profilo_linkedin().
@@ -286,8 +287,44 @@ def analizza_profilo_linkedin_stream(
       - Chiama Proxycurl (o usa cache se < 30 giorni)
       - Esegue seconda analisi Claude con dati arricchiti
     """
-    print(f"=== ANALISI START: linkedin_url={linkedin_url} ===", flush=True)
+    print(f"=== ANALISI START: linkedin_url={linkedin_url} punteggio_forzato={punteggio_forzato} ===", flush=True)
     testo_profilo = clean_text(testo_profilo)
+
+    # ── Punteggio forzato: salta analisi base e va direttamente all'arricchimento ──
+    if punteggio_forzato is not None and punteggio_forzato >= 5:
+        print(f"=== PUNTEGGIO FORZATO: {punteggio_forzato} — skip analisi base ===", flush=True)
+        risultato = {
+            "punteggio": punteggio_forzato,
+            "analisi_percorso": "",
+            "spunti_contatto": [],
+            "messaggio_outreach": "",
+            "arricchito": False,
+        }
+        if linkedin_url or dati_proxycurl_cached:
+            yield f"data: {json.dumps({'type': 'arricchimento_start'}, ensure_ascii=False)}\n\n"
+            try:
+                from proxycurl_helpers import arricchisci_profilo, is_cache_valida
+                dati_prx = None
+                if dati_proxycurl_cached and is_cache_valida(dati_proxycurl_cached):
+                    dati_prx = dati_proxycurl_cached
+                    logger.info("[AI] Proxycurl (forzato): uso cache per %s", linkedin_url)
+                elif linkedin_url:
+                    print(f"=== ENRICHLAYER START: url={linkedin_url} ===", flush=True)
+                    dati_prx = arricchisci_profilo(linkedin_url)
+                    print(f"=== ENRICHLAYER DONE: campi={len(dati_prx) if dati_prx else 0} ===", flush=True)
+                if dati_prx:
+                    enriched = analizza_profilo_arricchito(testo_profilo, tipo_profilo, dati_prx, risultato)
+                    if enriched:
+                        risultato.update(enriched)
+                        risultato["arricchito"] = True
+                        yield f"data: {json.dumps({'type': '_proxycurl_data', 'dati': dati_prx}, ensure_ascii=False)}\n\n"
+            except Exception as e_prx:
+                logger.error("[AI] Errore arricchimento forzato: %s", e_prx)
+                print(f"=== ENRICHLAYER ERROR (forzato): {e_prx} ===", flush=True)
+        risultato.pop("dati_proxycurl", None)
+        print(f"=== SSE DONE (forzato): arricchito={risultato.get('arricchito')} ===", flush=True)
+        yield f"data: {json.dumps({'type': 'done', 'risultato': risultato}, ensure_ascii=False)}\n\n"
+        return
 
     # Stessa logica di costruzione prompt di analizza_profilo_linkedin
     if impostazioni:
