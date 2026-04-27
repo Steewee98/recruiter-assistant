@@ -1035,6 +1035,112 @@ body {
 }
 
 /* =============================================
+   RICERCA — 3 colonne
+   ============================================= */
+.ricerca-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.25rem;
+    margin-bottom: 1.5rem;
+}
+
+.ricerca-card {
+    background: white;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    border: 1px solid var(--grigio-bordo);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.ricerca-card-icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    line-height: 1;
+}
+
+.ricerca-card-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--blu-scuro);
+    margin-bottom: 0.35rem;
+}
+
+.ricerca-card-desc {
+    font-size: 0.82rem;
+    color: var(--grigio-testo);
+    margin-bottom: 1rem;
+    line-height: 1.4;
+}
+
+.ricerca-card-body {
+    width: 100%;
+    text-align: left;
+}
+
+.ricerca-card-body .form-group {
+    margin-bottom: 0.75rem;
+}
+
+.ricerca-card-body .form-label {
+    font-size: 0.8rem;
+    margin-bottom: 0.3rem;
+}
+
+.ricerca-card-body .form-input {
+    font-size: 0.85rem;
+    padding: 0.5rem 0.75rem;
+}
+
+.ricerca-card-link {
+    display: block;
+    text-align: center;
+    margin-top: 0.75rem;
+    font-size: 0.8rem;
+    color: var(--azzurro);
+    text-decoration: none;
+    font-weight: 500;
+}
+.ricerca-card-link:hover {
+    text-decoration: underline;
+}
+
+/* Toggle mini A/B */
+.profilo-toggle-mini {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.toggle-mini {
+    flex: 1;
+    padding: 0.4rem 0;
+    border: 1.5px solid var(--grigio-bordo);
+    border-radius: 6px;
+    background: white;
+    font-family: var(--font);
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--grigio-testo);
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+}
+
+.toggle-mini:hover {
+    border-color: var(--azzurro);
+    color: var(--azzurro);
+}
+
+.toggle-mini.selected {
+    background: var(--azzurro);
+    border-color: var(--azzurro);
+    color: white;
+}
+
+/* =============================================
    RESPONSIVE
    ============================================= */
 @media (max-width: 900px) {
@@ -1356,6 +1462,10 @@ body {
 
     /* Pannello stato candidati */
     .stato-table { min-width: 560px; }
+
+    /* Ricerca grid: 1 colonna su mobile */
+    .ricerca-grid { grid-template-columns: 1fr; }
+    .ricerca-card { margin-left: 1rem; margin-right: 1rem; }
 }
 
 /* =============================================
@@ -1366,6 +1476,8 @@ body {
     .main-content { padding: 1.5rem 1.75rem; }
     .dash-cards { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
     .dash-grid { grid-template-columns: 1fr; }
+    /* Ricerca: stack su tablet stretto */
+    .ricerca-grid { grid-template-columns: 1fr 1fr; }
 }
 
 /* =============================================

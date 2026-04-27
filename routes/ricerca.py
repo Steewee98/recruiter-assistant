@@ -542,6 +542,124 @@ def index():
                            cronologia=cronologia)
 
 
+@ricerca_bp.route("/ricerca/cerca_nome", methods=["POST"])
+def cerca_nome():
+    """
+    Cerca un profilo specifico su LinkedIn per nome e cognome.
+    Usa Apify con keywords=nome+cognome senza currentJobTitles.
+    Restituisce il primo risultato trovato.
+    """
+    dati = request.get_json()
+    nome_cognome = (dati.get("nome_cognome") or "").strip()
+    azienda      = (dati.get("azienda") or "").strip()
+    tipo_profilo = dati.get("tipo_profilo", "A")
+
+    if not nome_cognome:
+        return jsonify({"errore": "Inserisci nome e cognome"}), 400
+
+    api_key = os.environ.get("APIFY_API_KEY", "")
+    if not api_key:
+        return jsonify({"errore": "APIFY_API_KEY non configurata"}), 500
+
+    # Costruisci input Apify: solo keywords, niente currentJobTitles
+    run_input = {
+        "takePages": 1,
+        "startPage": 1,
+        "maxItems": 5,
+        "keywords": nome_cognome,
+        "locations": ["Italy"],
+    }
+    if azienda:
+        run_input["currentCompanies"] = [azienda]
+
+    log.info("CERCA NOME: input=%s", json.dumps(run_input, ensure_ascii=False))
+    print(f"=== CERCA NOME: {nome_cognome} (azienda={azienda}) ===", flush=True)
+
+    # Avvia run Apify
+    try:
+        resp = requests.post(
+            f"{APIFY_BASE}/acts/{APIFY_ACTOR}/runs",
+            json=run_input,
+            params={"token": api_key},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        run_data   = resp.json()["data"]
+        run_id     = run_data["id"]
+        dataset_id = run_data["defaultDatasetId"]
+    except requests.exceptions.RequestException as e:
+        return jsonify({"errore": f"Errore Apify: {str(e)}"}), 500
+
+    # Poll fino a completamento (max 2 minuti)
+    max_wait = 120
+    elapsed  = 0
+    while elapsed < max_wait:
+        time.sleep(5)
+        elapsed += 5
+        try:
+            sr = requests.get(f"{APIFY_BASE}/actor-runs/{run_id}",
+                              params={"token": api_key}, timeout=10)
+            sr.raise_for_status()
+            status = sr.json()["data"].get("status", "")
+            if status == "SUCCEEDED":
+                dataset_id = sr.json()["data"].get("defaultDatasetId", dataset_id)
+                break
+            elif status in ("FAILED", "TIMED-OUT", "ABORTED"):
+                return jsonify({"errore": f"Ricerca terminata: {status}"}), 500
+        except requests.exceptions.RequestException:
+            pass
+    else:
+        return jsonify({"errore": "Timeout ricerca (2 min)"}), 500
+
+    # Recupera risultati
+    try:
+        items_resp = requests.get(
+            f"{APIFY_BASE}/datasets/{dataset_id}/items",
+            params={"token": api_key, "limit": 5},
+            timeout=30,
+        )
+        items_resp.raise_for_status()
+        items = items_resp.json()
+        if isinstance(items, dict):
+            items = items.get("items", [])
+    except requests.exceptions.RequestException as e:
+        return jsonify({"errore": f"Errore recupero risultati: {str(e)}"}), 500
+
+    if not items:
+        return jsonify({"errore": "Nessun profilo trovato per questo nome"}), 404
+
+    # Normalizza e restituisci il primo profilo
+    profilo = normalizza_profilo(items[0])
+    profilo["tipo_profilo"] = tipo_profilo
+
+    # Salva nella cronologia
+    parametri_str = json.dumps({'nome_cognome': nome_cognome, 'azienda': azienda},
+                               ensure_ascii=False)
+    db = get_db()
+    cur = db.execute(
+        """INSERT INTO ricerche_automatiche
+           (tipo_profilo, parametri, profili_trovati, profili_importati, fonte, stato)
+           VALUES (?, ?, 1, 0, 'manuale', 'completata')""",
+        (tipo_profilo, parametri_str)
+    )
+    ricerca_id = cur.lastrowid
+    testo = _costruisci_testo_profilo(profilo)
+    cur_p = db.execute(
+        """INSERT INTO profili_ricerca
+           (ricerca_id, nome, cognome, ruolo, azienda, location, linkedin_url, testo_profilo)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (ricerca_id, profilo["nome"], profilo["cognome"], profilo["ruolo"],
+         profilo["azienda"], profilo["location"], profilo["linkedin"], testo)
+    )
+    profilo["profilo_ricerca_id"] = cur_p.lastrowid
+    profilo["ricerca_id"] = ricerca_id
+    db.commit()
+    db.close()
+
+    print(f"=== CERCA NOME OK: {profilo['nome']} {profilo['cognome']} — {profilo['ruolo']} ===", flush=True)
+    return jsonify({"profilo": profilo, "ricerca_id": ricerca_id})
+
+
 @ricerca_bp.route("/ricerca/cerca", methods=["POST"])
 def cerca():
     """

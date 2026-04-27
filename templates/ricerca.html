@@ -3,174 +3,172 @@
 
 {% block content %}
 <div class="page-header">
-    <h1 class="page-title">&#128269; Ricerca Candidati</h1>
+    <h1 class="page-title">Ricerca Candidati</h1>
     <p class="page-subtitle">Trova figure professionali su LinkedIn tramite Apify e importale nella pipeline</p>
 </div>
 
-<!-- ===== SEZIONE RICERCA AUTOMATICA ===== -->
-<div class="card" style="margin-bottom:1.5rem;border-left:4px solid var(--azzurro);">
-    <div class="card-header">
-        <h3>&#9889; Ricerca Automatica</h3>
-        <span style="font-size:0.8rem;color:var(--grigio-testo);">Usa i parametri configurati in Impostazioni</span>
-    </div>
-    <div class="card-body">
-        <div class="form-row" style="align-items:flex-end;gap:1rem;margin-bottom:1.25rem;">
-            <div class="form-group" style="max-width:260px;">
-                <label class="form-label">Numero massimo profili da cercare</label>
+<!-- ===== 3 COLONNE RICERCA ===== -->
+<div class="ricerca-grid">
+
+    <!-- COLONNA 1 — Ricerca Automatica -->
+    <div class="ricerca-card">
+        <div class="ricerca-card-icon">&#9889;</div>
+        <h3 class="ricerca-card-title">Ricerca Automatica</h3>
+        <p class="ricerca-card-desc">Cerca candidati usando i parametri configurati nelle Impostazioni</p>
+
+        <div class="ricerca-card-body">
+            <div class="form-group" style="margin-bottom:1rem;">
+                <label class="form-label">Numero massimo profili</label>
                 <input type="number" id="max-profili" class="form-input" value="20" min="1" max="100">
             </div>
-        </div>
-        <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center;">
-            <button class="btn btn-primary btn-lg" id="btn-auto-a"
-                    onclick="ricercaAutomatica('A')"
-                    {% if not imp_a_configurato %}disabled title="Configura prima il Profilo A in Impostazioni"{% endif %}>
-                &#128100; Ricerca Automatica Profilo A
-            </button>
-            <button class="btn btn-primary btn-lg" id="btn-auto-b"
-                    onclick="ricercaAutomatica('B')"
-                    {% if not imp_b_configurato %}disabled title="Configura prima il Profilo B in Impostazioni"{% endif %}>
-                &#128100; Ricerca Automatica Profilo B
-            </button>
-            {% if not imp_a_configurato or not imp_b_configurato %}
-            <a href="{{ url_for('impostazioni.index') }}" class="btn btn-outline btn-sm">
-                &#9881; Configura Impostazioni
-            </a>
-            {% endif %}
-        </div>
-
-        <!-- Box riepilogo risultati ricerca automatica -->
-        <div id="auto-risultato" class="hidden" style="margin-top:1.5rem;padding:1rem 1.25rem;
-             background:var(--azzurro-light);border-radius:var(--radius);border:1px solid #c5deff;">
-            <h4 style="margin-bottom:0.75rem;color:var(--azzurro);">Riepilogo ricerca</h4>
-            <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:0.5rem;">
-                <div style="text-align:center;">
-                    <span style="font-size:1.5rem;font-weight:700;" id="auto-trovati-apify">—</span>
-                    <div style="font-size:0.78rem;color:var(--grigio-testo);">Trovati da Apify</div>
-                </div>
-                <div style="text-align:center;">
-                    <span style="font-size:1.5rem;font-weight:700;color:#2563eb;" id="auto-filtrati">—</span>
-                    <div style="font-size:0.78rem;color:var(--grigio-testo);">Passati il filtro</div>
-                </div>
-                <div style="text-align:center;">
-                    <span style="font-size:1.5rem;font-weight:700;color:#d97706;" id="auto-presenti">—</span>
-                    <div style="font-size:0.78rem;color:var(--grigio-testo);">Già presenti</div>
-                </div>
-                <div style="text-align:center;">
-                    <span style="font-size:1.5rem;font-weight:700;color:#16a34a;" id="auto-importati">—</span>
-                    <div style="font-size:0.78rem;color:var(--grigio-testo);">Importati</div>
-                </div>
-                <div style="text-align:center;">
-                    <span style="font-size:1.5rem;font-weight:700;" id="auto-valutati">—</span>
-                    <div style="font-size:0.78rem;color:var(--grigio-testo);">Valutati AI</div>
-                </div>
-                <div style="text-align:center;">
-                    <span style="font-size:1.5rem;font-weight:700;" id="auto-punteggio">—</span>
-                    <div style="font-size:0.78rem;color:var(--grigio-testo);">Punteggio medio</div>
-                </div>
+            <div style="display:flex;gap:0.75rem;">
+                <button class="btn btn-primary" style="flex:1;" id="btn-auto-a"
+                        onclick="ricercaAutomatica('A')"
+                        {% if not imp_a_configurato %}disabled title="Configura prima il Profilo A"{% endif %}>
+                    Profilo A
+                </button>
+                <button class="btn btn-primary" style="flex:1;" id="btn-auto-b"
+                        onclick="ricercaAutomatica('B')"
+                        {% if not imp_b_configurato %}disabled title="Configura prima il Profilo B"{% endif %}>
+                    Profilo B
+                </button>
             </div>
-            <div id="auto-motivi" class="hidden"
-                 style="margin-top:0.5rem;font-size:0.82rem;color:#dc2626;"></div>
-            <div style="margin-top:0.75rem;">
-                <a href="/pipeline" class="btn btn-primary btn-sm">&#9776; Vai alla Pipeline</a>
-            </div>
+            <a href="{{ url_for('impostazioni.index') }}" class="ricerca-card-link">Configura parametri &rarr;</a>
         </div>
 
         <!-- Box progresso ricerca asincrona -->
-        <div id="auto-progresso" class="hidden" style="margin-top:1.5rem;padding:1rem 1.25rem;
+        <div id="auto-progresso" class="hidden" style="margin-top:1rem;padding:0.75rem 1rem;
              background:#f0f7ff;border-radius:var(--radius);border:1px solid #bfdbfe;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
-                <div style="display:flex;align-items:center;gap:0.75rem;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;">
+                <div style="display:flex;align-items:center;gap:0.5rem;">
                     <span class="spinner" id="auto-spinner"></span>
-                    <span id="auto-step-msg" style="font-size:0.95rem;color:var(--blu-scuro);font-weight:500;">
-                        Preparazione ricerca...
+                    <span id="auto-step-msg" style="font-size:0.85rem;color:var(--blu-scuro);font-weight:500;">
+                        Preparazione...
                     </span>
                 </div>
-                <span id="auto-pct-label" style="font-size:0.9rem;font-weight:700;color:var(--azzurro);white-space:nowrap;">0%</span>
+                <span id="auto-pct-label" style="font-size:0.85rem;font-weight:700;color:var(--azzurro);">0%</span>
             </div>
-            <div style="background:#dbeafe;border-radius:4px;height:8px;overflow:hidden;">
+            <div style="background:#dbeafe;border-radius:4px;height:6px;overflow:hidden;">
                 <div id="auto-progress-bar"
                      style="height:100%;background:var(--azzurro);border-radius:4px;
                             width:0%;transition:width 0.5s ease;"></div>
             </div>
-            <p style="margin-top:0.6rem;font-size:0.8rem;color:var(--grigio-testo);">
-                La ricerca può richiedere 2–4 minuti. Puoi navigare altrove — i risultati saranno in Pipeline.
+            <p style="margin-top:0.4rem;font-size:0.75rem;color:var(--grigio-testo);">
+                2-4 minuti. Puoi navigare altrove.
             </p>
         </div>
-    </div>
-</div>
 
-<!-- Separatore visivo -->
-<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
-    <hr style="flex:1;border:none;border-top:1px solid var(--grigio-bordo);">
-    <span style="color:var(--grigio-testo);font-size:0.85rem;white-space:nowrap;">oppure ricerca manuale</span>
-    <hr style="flex:1;border:none;border-top:1px solid var(--grigio-bordo);">
-</div>
-
-<!-- Form di ricerca manuale -->
-<div class="card">
-    <div class="card-header">
-        <h3>Parametri di ricerca</h3>
-    </div>
-    <div class="card-body">
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-label">Ruolo / Titolo</label>
-                <input type="text" id="ruolo" class="form-input" placeholder="es. Software Engineer, Sales Director...">
-            </div>
-            <div class="form-group">
-                <label class="form-label">Parole chiave (headline)</label>
-                <input type="text" id="parole_chiave" class="form-input" placeholder="es. SaaS, B2B, startup, Python...">
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-label">Città / Location</label>
-                <input type="text" id="citta" class="form-input" placeholder="es. Milan, Rome, Italy, United States...">
-            </div>
-            <div class="form-group">
-                <label class="form-label">Azienda attuale (opzionale)</label>
-                <input type="text" id="azienda" class="form-input" placeholder="es. Google, Ferrari...">
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-label">Pagine di risultati</label>
-                <select id="num_pagine" class="form-input form-select">
-                    <option value="1" selected>1 pagina (~10 profili)</option>
-                    <option value="2">2 pagine (~20 profili)</option>
-                    <option value="3">3 pagine (~30 profili)</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label class="form-label">Tipo profilo da cercare</label>
-                <div class="profilo-toggle" style="margin-top:0.25rem;">
-                    <label class="toggle-option selected" id="toggle-cerca-a" onclick="selezionaTipoCerca('A')">
-                        <input type="radio" name="tipo_profilo_cerca" value="A" checked>
-                        <span class="toggle-badge">Profilo A</span>
-                    </label>
-                    <label class="toggle-option" id="toggle-cerca-b" onclick="selezionaTipoCerca('B')">
-                        <input type="radio" name="tipo_profilo_cerca" value="B">
-                        <span class="toggle-badge">Profilo B</span>
-                    </label>
+        <!-- Box riepilogo risultati ricerca automatica -->
+        <div id="auto-risultato" class="hidden" style="margin-top:1rem;padding:0.75rem 1rem;
+             background:var(--azzurro-light);border-radius:var(--radius);border:1px solid #c5deff;">
+            <h4 style="margin-bottom:0.5rem;color:var(--azzurro);font-size:0.85rem;">Riepilogo</h4>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin-bottom:0.4rem;">
+                <div style="text-align:center;">
+                    <span style="font-size:1.2rem;font-weight:700;" id="auto-trovati-apify">&mdash;</span>
+                    <div style="font-size:0.7rem;color:var(--grigio-testo);">Trovati</div>
+                </div>
+                <div style="text-align:center;">
+                    <span style="font-size:1.2rem;font-weight:700;color:#16a34a;" id="auto-importati">&mdash;</span>
+                    <div style="font-size:0.7rem;color:var(--grigio-testo);">Importati</div>
+                </div>
+                <div style="text-align:center;">
+                    <span style="font-size:1.2rem;font-weight:700;" id="auto-punteggio">&mdash;</span>
+                    <div style="font-size:0.7rem;color:var(--grigio-testo);">Punteggio</div>
                 </div>
             </div>
+            <div style="display:none;" id="auto-stats-extra">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin-bottom:0.4rem;">
+                    <div style="text-align:center;">
+                        <span style="font-size:1.2rem;font-weight:700;color:#2563eb;" id="auto-filtrati">&mdash;</span>
+                        <div style="font-size:0.7rem;color:var(--grigio-testo);">Filtrati</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <span style="font-size:1.2rem;font-weight:700;color:#d97706;" id="auto-presenti">&mdash;</span>
+                        <div style="font-size:0.7rem;color:var(--grigio-testo);">Gi&agrave; presenti</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <span style="font-size:1.2rem;font-weight:700;" id="auto-valutati">&mdash;</span>
+                        <div style="font-size:0.7rem;color:var(--grigio-testo);">Valutati AI</div>
+                    </div>
+                </div>
+            </div>
+            <div id="auto-motivi" class="hidden"
+                 style="margin-top:0.4rem;font-size:0.78rem;color:#dc2626;"></div>
+            <div style="margin-top:0.5rem;">
+                <a href="/pipeline" class="btn btn-primary btn-sm">Vai alla Pipeline</a>
+            </div>
         </div>
-        <div class="form-actions">
-            <button class="btn btn-primary btn-lg" id="btn-cerca" onclick="cercaFigure()">
+    </div>
+
+    <!-- COLONNA 2 — Ricerca per Parametri -->
+    <div class="ricerca-card">
+        <div class="ricerca-card-icon">&#128269;</div>
+        <h3 class="ricerca-card-title">Ricerca per Parametri</h3>
+        <p class="ricerca-card-desc">Cerca per ruolo, citt&agrave; e parole chiave</p>
+
+        <div class="ricerca-card-body">
+            <div class="form-group">
+                <label class="form-label">Ruolo / Titolo</label>
+                <input type="text" id="ruolo" class="form-input" placeholder="es. Private Banker, Consulente...">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Citt&agrave;</label>
+                <input type="text" id="citta" class="form-input" placeholder="es. Milano, Roma...">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Parole chiave <span style="color:var(--grigio-testo);font-weight:400;">(opzionale)</span></label>
+                <input type="text" id="parole_chiave" class="form-input" placeholder="es. Fideuram, wealth management...">
+            </div>
+            <div class="form-group" style="margin-bottom:0.75rem;">
+                <label class="form-label">Profilo</label>
+                <div class="profilo-toggle-mini">
+                    <button type="button" class="toggle-mini selected" id="toggle-cerca-a" onclick="selezionaTipoCerca('A')">A</button>
+                    <button type="button" class="toggle-mini" id="toggle-cerca-b" onclick="selezionaTipoCerca('B')">B</button>
+                </div>
+            </div>
+            <button class="btn btn-primary btn-lg" style="width:100%;" id="btn-cerca" onclick="cercaFigure()">
                 &#128269; Cerca Candidati
+            </button>
+        </div>
+    </div>
+
+    <!-- COLONNA 3 — Cerca per Nome -->
+    <div class="ricerca-card">
+        <div class="ricerca-card-icon">&#128100;</div>
+        <h3 class="ricerca-card-title">Cerca per Nome</h3>
+        <p class="ricerca-card-desc">Trova un profilo specifico su LinkedIn e analizzalo direttamente</p>
+
+        <div class="ricerca-card-body">
+            <div class="form-group">
+                <label class="form-label">Nome e Cognome</label>
+                <input type="text" id="nome-cognome" class="form-input" placeholder="es. Mario Rossi">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Azienda attuale <span style="color:var(--grigio-testo);font-weight:400;">(opzionale)</span></label>
+                <input type="text" id="azienda-nome" class="form-input" placeholder="es. Fideuram, Mediolanum...">
+            </div>
+            <div class="form-group" style="margin-bottom:0.75rem;">
+                <label class="form-label">Profilo</label>
+                <div class="profilo-toggle-mini">
+                    <button type="button" class="toggle-mini selected" id="toggle-nome-a" onclick="selezionaTipoNome('A')">A</button>
+                    <button type="button" class="toggle-mini" id="toggle-nome-b" onclick="selezionaTipoNome('B')">B</button>
+                </div>
+            </div>
+            <button class="btn btn-primary btn-lg" style="width:100%;" id="btn-cerca-nome" onclick="cercaPerNome()">
+                &#9733; Cerca e Analizza
             </button>
         </div>
     </div>
 </div>
 
-<!-- Risultati -->
+<!-- ===== RISULTATI RICERCA PER PARAMETRI ===== -->
 <div id="risultati-section" class="hidden">
     <div class="card table-card">
         <div class="card-header">
             <h3 id="risultati-titolo">Risultati</h3>
             <div style="display:flex;gap:0.5rem;align-items:center;">
                 <button id="btn-altri" class="btn btn-secondary btn-sm hidden" onclick="caricaAltri()">
-                    Carica altri &#8594;
+                    Carica altri &rarr;
                 </button>
             </div>
         </div>
@@ -196,21 +194,38 @@
 <div id="nessun-risultato" class="hidden">
     <div class="card">
         <div class="card-body">
-            <div class="empty-state">
+            <div class="empty-state" style="padding:2rem;">
                 <div class="empty-icon">&#128269;</div>
                 <h3>Nessun risultato trovato</h3>
-                <p>Prova a modificare i parametri di ricerca o verifica la chiave API Proxycurl.</p>
+                <p>Prova a modificare i parametri di ricerca.</p>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Panel analisi inline (appare dopo aver cliccato "Analizza") -->
+<!-- ===== RISULTATO RICERCA PER NOME (profilo singolo + analisi) ===== -->
+<div id="nome-risultato" class="hidden">
+    <div class="card">
+        <div class="card-header">
+            <h3 id="nome-risultato-titolo">Profilo trovato</h3>
+        </div>
+        <div class="card-body">
+            <div id="nome-profilo-info" style="display:flex;gap:1.5rem;align-items:flex-start;flex-wrap:wrap;margin-bottom:1rem;">
+                <!-- Popolato via JS -->
+            </div>
+            <div id="nome-analisi-status" style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem 1rem;
+                 background:#f0f7ff;border-radius:var(--radius);border:1px solid #bfdbfe;">
+                <span class="spinner"></span>
+                <span style="font-size:0.9rem;color:var(--blu-scuro);font-weight:500;">Analisi AI in corso...</span>
+            </div>
+        </div>
+    </div>
+</div>
 
-<!-- Cronologia Ricerche -->
+<!-- ===== CRONOLOGIA RICERCHE ===== -->
 <div class="card" style="margin-top:2rem;">
     <div class="card-header">
-        <h3>&#128203; Cronologia Ricerche</h3>
+        <h3>Cronologia Ricerche</h3>
         <a href="/ricerca/export_csv" class="btn btn-outline btn-sm">&#8595; Esporta CSV</a>
     </div>
     {% if cronologia %}
@@ -257,7 +272,7 @@
                         <span class="score-badge score-badge-{{ 'alto' if r.punteggio_medio >= 8 else ('medio' if r.punteggio_medio >= 5 else 'basso') }}">
                             {{ '%.1f'|format(r.punteggio_medio) }}/10
                         </span>
-                        {% else %}—{% endif %}
+                        {% else %}&mdash;{% endif %}
                     </td>
                     <td>
                         {% if r.stato == 'completata' %}
@@ -277,7 +292,7 @@
     <div class="card-body">
         <div class="empty-state" style="padding:2rem;">
             <div class="empty-icon">&#128269;</div>
-            <p>Nessuna ricerca ancora. Le ricerche automatiche e gli inserimenti manuali appariranno qui.</p>
+            <p>Nessuna ricerca ancora. Le ricerche appariranno qui.</p>
         </div>
     </div>
     {% endif %}
@@ -288,7 +303,7 @@
     <div class="modal">
         <div class="modal-header">
             <h3>Importa Candidato</h3>
-            <button class="modal-close" onclick="chiudiModal()">&#215;</button>
+            <button class="modal-close" onclick="chiudiModal()">&times;</button>
         </div>
         <div class="modal-body">
             <p style="margin-bottom:1.25rem;color:var(--grigio-testo);font-size:0.9rem;">
@@ -322,10 +337,25 @@
 /* Stato globale                                                        */
 /* ------------------------------------------------------------------ */
 let tipoProfiloSelezionato = 'A';   // per modal importa
-let tipoCercaSelezionato   = 'A';   // per form ricerca manuale
+let tipoCercaSelezionato   = 'A';   // per form ricerca parametri
+let tipoNomeSelezionato    = 'A';   // per form ricerca nome
 let tipoAnalisiSelezionato = 'A';   // per modal analisi AI
-let ricercaIdCorrente      = null;  // id del record ricerche_automatiche corrente
-let personaInAnalisi       = null;  // candidato che sta per essere analizzato
+let ricercaIdCorrente      = null;
+let personaInAnalisi       = null;
+
+/* ------------------------------------------------------------------ */
+/* Toggle profilo mini (A/B)                                            */
+/* ------------------------------------------------------------------ */
+function selezionaTipoCerca(tipo) {
+    tipoCercaSelezionato = tipo;
+    document.getElementById('toggle-cerca-a').classList.toggle('selected', tipo === 'A');
+    document.getElementById('toggle-cerca-b').classList.toggle('selected', tipo === 'B');
+}
+function selezionaTipoNome(tipo) {
+    tipoNomeSelezionato = tipo;
+    document.getElementById('toggle-nome-a').classList.toggle('selected', tipo === 'A');
+    document.getElementById('toggle-nome-b').classList.toggle('selected', tipo === 'B');
+}
 
 /* ------------------------------------------------------------------ */
 /* Ricerca Automatica (asincrona con polling)                          */
@@ -341,7 +371,7 @@ function ricercaAutomatica(tipo) {
 
     btnA.disabled = true;
     btnB.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> Avvio ricerca...';
+    btn.innerHTML = '<span class="spinner"></span> Ricerca...';
     document.getElementById('auto-risultato').classList.add('hidden');
     document.getElementById('auto-progresso').classList.remove('hidden');
     document.getElementById('auto-step-msg').textContent = 'Preparazione ricerca...';
@@ -362,7 +392,7 @@ function ricercaAutomatica(tipo) {
         return jsonSicuro(r);
     })
     .then(function(data) {
-        btn.innerHTML = '&#128100; Ricerca Automatica Profilo ' + tipo;
+        btn.innerHTML = 'Profilo ' + tipo;
         if (data.errore) {
             _ripristinaBtn(tipo);
             alert('Errore: ' + data.errore);
@@ -382,9 +412,7 @@ function _avviaPolling(jobId, tipo) {
         fetch('/ricerca/stato/' + jobId)
         .then(function(r) { return jsonSicuro(r); })
         .then(function(data) {
-            // Aggiorna messaggio step
             document.getElementById('auto-step-msg').textContent = data.step || '...';
-            // Aggiorna barra deterministica
             var pct = data.percentuale || 0;
             document.getElementById('auto-progress-bar').style.width = pct + '%';
             document.getElementById('auto-pct-label').textContent = pct + '%';
@@ -399,7 +427,6 @@ function _avviaPolling(jobId, tipo) {
                 clearInterval(_pollingTimer);
                 _pollingTimer = null;
                 _ripristinaBtn(tipo);
-                // Mostra barra rossa e messaggio errore
                 document.getElementById('auto-progress-bar').style.background = '#dc2626';
                 document.getElementById('auto-pct-label').style.color = '#dc2626';
                 document.getElementById('auto-step-msg').style.color = '#dc2626';
@@ -414,8 +441,10 @@ function _avviaPolling(jobId, tipo) {
 }
 
 function _ripristinaBtn(tipo) {
-    {% if imp_a_configurato %}document.getElementById('btn-auto-a').disabled = false;{% endif %}
-    {% if imp_b_configurato %}document.getElementById('btn-auto-b').disabled = false;{% endif %}
+    {% if imp_a_configurato %}document.getElementById('btn-auto-a').disabled = false;
+    document.getElementById('btn-auto-a').innerHTML = 'Profilo A';{% endif %}
+    {% if imp_b_configurato %}document.getElementById('btn-auto-b').disabled = false;
+    document.getElementById('btn-auto-b').innerHTML = 'Profilo B';{% endif %}
 }
 
 function _mostraRiepilogo(data) {
@@ -427,28 +456,29 @@ function _mostraRiepilogo(data) {
     document.getElementById('auto-punteggio').textContent     = data.punteggio_medio != null
         ? data.punteggio_medio + '/10' : '—';
 
+    // Mostra griglia extra se ci sono dati
+    if (data.filtrati || data.gia_presenti || data.valutati) {
+        document.getElementById('auto-stats-extra').style.display = '';
+    }
+
     var motiviEl = document.getElementById('auto-motivi');
     var righe = [];
-
-    // Motivi scarto qualità
     if (data.scartati_qualita > 0 && data.motivi_qualita && Object.keys(data.motivi_qualita).length) {
-        righe.push('Scartati qualità (' + data.scartati_qualita + '): ' +
+        righe.push('Scartati qualit\u00e0 (' + data.scartati_qualita + '): ' +
             Object.entries(data.motivi_qualita)
-                .map(function(e) { return e[0] + ' (' + e[1] + ')'; }).join(' · '));
+                .map(function(e) { return e[0] + ' (' + e[1] + ')'; }).join(' \u00b7 '));
     }
-    // Motivi scarto filtro locale
     if (data.scartati_filtro > 0 && data.motivi_filtro && Object.keys(data.motivi_filtro).length) {
         righe.push('Scartati filtro (' + data.scartati_filtro + '): ' +
             Object.entries(data.motivi_filtro)
-                .map(function(e) { return e[0] + ' (' + e[1] + ')'; }).join(' · '));
+                .map(function(e) { return e[0] + ' (' + e[1] + ')'; }).join(' \u00b7 '));
     }
-    // AI limit
     if (data.importati > data.valutati) {
         righe.push('Analisi AI sui primi 10. I restanti ' +
             (data.importati - data.valutati) + ' sono in pipeline con stato "Da valutare".');
     }
     if (righe.length) {
-        motiviEl.innerHTML = righe.map(function(r) { return '• ' + r; }).join('<br>');
+        motiviEl.innerHTML = righe.map(function(r) { return '\u2022 ' + r; }).join('<br>');
         motiviEl.classList.remove('hidden');
     } else {
         motiviEl.classList.add('hidden');
@@ -456,18 +486,8 @@ function _mostraRiepilogo(data) {
     document.getElementById('auto-risultato').classList.remove('hidden');
 }
 
-
 /* ------------------------------------------------------------------ */
-/* Tipo profilo form ricerca                                            */
-/* ------------------------------------------------------------------ */
-function selezionaTipoCerca(tipo) {
-    tipoCercaSelezionato = tipo;
-    document.getElementById('toggle-cerca-a').classList.toggle('selected', tipo === 'A');
-    document.getElementById('toggle-cerca-b').classList.toggle('selected', tipo === 'B');
-}
-
-/* ------------------------------------------------------------------ */
-/* Ricerca manuale                                                      */
+/* Ricerca per Parametri (manuale)                                      */
 /* ------------------------------------------------------------------ */
 function cercaFigure() {
     const ruolo         = document.getElementById('ruolo').value.trim();
@@ -482,6 +502,7 @@ function cercaFigure() {
     document.getElementById('risultati-section').classList.add('hidden');
     document.getElementById('nessun-risultato').classList.add('hidden');
     document.getElementById('btn-altri').classList.add('hidden');
+    document.getElementById('nome-risultato').classList.add('hidden');
     ricercaIdCorrente = null;
 
     const btn = document.getElementById('btn-cerca');
@@ -496,8 +517,8 @@ function cercaFigure() {
             parole_chiave: parole_chiave,
             citta:         document.getElementById('citta').value.trim(),
             paese:         '',
-            azienda:       document.getElementById('azienda').value.trim(),
-            num_pagine:    parseInt(document.getElementById('num_pagine').value),
+            azienda:       '',
+            num_pagine:    1,
             tipo_profilo:  tipoCercaSelezionato,
         })
     })
@@ -534,27 +555,26 @@ function renderRisultati(persone, totale, tentativi, messaggio) {
     messaggio = messaggio || '';
     const tbody = document.getElementById('risultati-tbody');
     tbody.innerHTML = '';
-    _profiliRicerca = [];  // reset ad ogni nuova ricerca
+    _profiliRicerca = [];
 
-    // Mostra SOLO profili non ancora in pipeline — quelli già presenti non appaiono mai
     const nuovi      = persone.filter(function(p) { return !p.gia_in_pipeline; });
     const giPresenti = persone.filter(function(p) { return  p.gia_in_pipeline; });
 
     nuovi.forEach(function(p, i) {
-        _profiliRicerca.push(p);  // salva il profilo nell'array globale
-        const nomeCompleto = [p.nome, p.cognome].filter(Boolean).join(' ') || '—';
-        const location = p.location || '—';
+        _profiliRicerca.push(p);
+        const nomeCompleto = [p.nome, p.cognome].filter(Boolean).join(' ') || '\u2014';
+        const location = p.location || '\u2014';
         const linkedinBtn = p.linkedin
             ? '<a href="' + escHtml(p.linkedin) + '" target="_blank" class="btn btn-outline btn-xs">LinkedIn</a>'
-            : '<span class="text-muted">—</span>';
+            : '<span class="text-muted">\u2014</span>';
         const headline = p.headline
             ? '<div class="candidato-meta">' + escHtml(p.headline.substring(0, 70)) + (p.headline.length > 70 ? '...' : '') + '</div>'
             : '';
 
         tbody.innerHTML += '<tr>' +
             '<td><div class="candidato-nome">' + escHtml(nomeCompleto) + '</div>' + headline + '</td>' +
-            '<td>' + escHtml(p.ruolo || '—') + '</td>' +
-            '<td>' + escHtml(p.azienda || '—') + '</td>' +
+            '<td>' + escHtml(p.ruolo || '\u2014') + '</td>' +
+            '<td>' + escHtml(p.azienda || '\u2014') + '</td>' +
             '<td>' + escHtml(location) + '</td>' +
             '<td>' + linkedinBtn + '</td>' +
             '<td style="display:flex;gap:0.4rem;">' +
@@ -565,26 +585,105 @@ function renderRisultati(persone, totale, tentativi, messaggio) {
             '</tr>';
     });
 
-    // Titolo: usa il messaggio riepilogo dal backend se disponibile
     const titoloEl = document.getElementById('risultati-titolo');
     if (nuovi.length === 0) {
         titoloEl.textContent = messaggio || 'Nessun profilo nuovo trovato';
         if (giPresenti.length > 0) {
             mostraAvviso(
-                'Tutti già in pipeline',
-                giPresenti.length + ' profil' + (giPresenti.length === 1 ? 'o già presente' : 'i già presenti') + ' in pipeline — esclusi dai risultati.',
+                'Tutti gi\u00e0 in pipeline',
+                giPresenti.length + ' profil' + (giPresenti.length === 1 ? 'o gi\u00e0 presente' : 'i gi\u00e0 presenti') + ' in pipeline \u2014 esclusi dai risultati.',
                 '/pipeline'
             );
         }
     } else {
-        // Messaggio sempre informativo dal backend (include fasi usate e per-ruolo)
         titoloEl.textContent = messaggio ||
             (nuovi.length + ' nuov' + (nuovi.length === 1 ? 'o profilo' : 'i profili') + ' trovati');
         if (giPresenti.length > 0) {
-            titoloEl.textContent += ' (' + giPresenti.length + ' già in pipeline, esclus' + (giPresenti.length === 1 ? 'o' : 'i') + ')';
+            titoloEl.textContent += ' (' + giPresenti.length + ' gi\u00e0 in pipeline, esclus' + (giPresenti.length === 1 ? 'o' : 'i') + ')';
         }
     }
     document.getElementById('risultati-section').classList.remove('hidden');
+}
+
+/* ------------------------------------------------------------------ */
+/* Ricerca per Nome                                                     */
+/* ------------------------------------------------------------------ */
+function cercaPerNome() {
+    var nomeCognome = document.getElementById('nome-cognome').value.trim();
+    if (!nomeCognome) {
+        alert('Inserisci nome e cognome.');
+        return;
+    }
+
+    // Nascondi risultati precedenti
+    document.getElementById('risultati-section').classList.add('hidden');
+    document.getElementById('nessun-risultato').classList.add('hidden');
+    document.getElementById('nome-risultato').classList.add('hidden');
+
+    var btn = document.getElementById('btn-cerca-nome');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Ricerca in corso...';
+
+    fetch('/ricerca/cerca_nome', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            nome_cognome: nomeCognome,
+            azienda:      document.getElementById('azienda-nome').value.trim(),
+            tipo_profilo: tipoNomeSelezionato,
+        })
+    })
+    .then(function(r) {
+        if (!r.ok) {
+            return r.json().then(function(d) {
+                throw new Error(d.errore || 'Errore ' + r.status);
+            }).catch(function() { throw new Error('Errore server ' + r.status); });
+        }
+        return jsonSicuro(r);
+    })
+    .then(function(data) {
+        btn.disabled = false;
+        btn.innerHTML = '&#9733; Cerca e Analizza';
+
+        if (data.errore) {
+            alert(data.errore);
+            return;
+        }
+
+        var p = data.profilo;
+        ricercaIdCorrente = data.ricerca_id || null;
+
+        // Mostra il profilo trovato
+        _mostraProfiloNome(p);
+
+        // Lancia analisi AI automaticamente
+        tipoAnalisiSelezionato = tipoNomeSelezionato;
+        avviaAnalisiDiretta(p);
+    })
+    .catch(function(err) {
+        btn.disabled = false;
+        btn.innerHTML = '&#9733; Cerca e Analizza';
+        alert('' + err);
+    });
+}
+
+function _mostraProfiloNome(p) {
+    var nomeCompleto = [p.nome, p.cognome].filter(Boolean).join(' ') || '\u2014';
+    document.getElementById('nome-risultato-titolo').textContent = 'Profilo trovato: ' + nomeCompleto;
+
+    var infoHtml =
+        '<div style="flex:1;min-width:200px;">' +
+            '<div style="font-size:1.1rem;font-weight:700;color:var(--testo);margin-bottom:0.25rem;">' + escHtml(nomeCompleto) + '</div>' +
+            '<div style="color:var(--grigio-testo);font-size:0.9rem;margin-bottom:0.15rem;">' + escHtml(p.ruolo || '\u2014') + '</div>' +
+            '<div style="color:var(--grigio-testo);font-size:0.85rem;">' + escHtml(p.azienda || '') +
+            (p.location ? ' \u00b7 ' + escHtml(p.location) : '') + '</div>' +
+            (p.linkedin ? '<a href="' + escHtml(p.linkedin) + '" target="_blank" style="display:inline-block;margin-top:0.5rem;font-size:0.85rem;color:var(--azzurro);text-decoration:none;">Apri LinkedIn &rarr;</a>' : '') +
+        '</div>';
+
+    document.getElementById('nome-profilo-info').innerHTML = infoHtml;
+    document.getElementById('nome-analisi-status').innerHTML =
+        '<span class="spinner"></span> <span style="font-size:0.9rem;color:var(--blu-scuro);font-weight:500;">Analisi AI in corso...</span>';
+    document.getElementById('nome-risultato').classList.remove('hidden');
 }
 
 /* ------------------------------------------------------------------ */
@@ -626,8 +725,8 @@ function confermaImport() {
             return r.json().then(function(data) {
                 chiudiModal();
                 mostraAvviso(
-                    'Profilo già presente',
-                    'Questo candidato è già in pipeline.',
+                    'Profilo gi\u00e0 presente',
+                    'Questo candidato \u00e8 gi\u00e0 in pipeline.',
                     data.candidato_id ? '/pipeline?candidato_id=' + data.candidato_id : null
                 );
             });
@@ -650,19 +749,17 @@ document.getElementById('modal-import').addEventListener('click', function(e) {
 });
 
 /* ------------------------------------------------------------------ */
-/* Modal Analisi AI                                                     */
-/* ------------------------------------------------------------------ */
 /* Analisi AI — apre modal Report AI con streaming                     */
 /* ------------------------------------------------------------------ */
 function avviaAnalisiDiretta(persona) {
     personaInAnalisi       = persona;
-    tipoAnalisiSelezionato = tipoCercaSelezionato;
+    tipoAnalisiSelezionato = tipoAnalisiSelezionato || tipoCercaSelezionato;
 
     var p = persona;
     var nomeCompleto = [p.nome, p.cognome].filter(Boolean).join(' ') || 'candidato';
 
     // Reset modal
-    document.getElementById('modal-report-titolo').textContent = '&#9733; Analisi AI: ' + nomeCompleto;
+    document.getElementById('modal-report-titolo').textContent = 'Analisi AI: ' + nomeCompleto;
     document.getElementById('modal-report-streaming').classList.remove('hidden');
     document.getElementById('modal-report-body').classList.add('hidden');
     document.getElementById('modal-report-body').innerHTML = '';
@@ -714,11 +811,23 @@ function avviaAnalisiDiretta(persona) {
                         } else if (ev.type === 'arricchimento_start') {
                             document.getElementById('modal-report-status').innerHTML =
                                 '&#11088; Arricchimento con dati LinkedIn in corso...';
+                            // Aggiorna status nel card nome-risultato se visibile
+                            var nrStatus = document.getElementById('nome-analisi-status');
+                            if (nrStatus && !document.getElementById('nome-risultato').classList.contains('hidden')) {
+                                nrStatus.innerHTML = '<span class="spinner"></span> <span style="font-size:0.9rem;color:var(--azzurro);font-weight:500;">Arricchimento LinkedIn...</span>';
+                            }
                         } else if (ev.type === 'done') {
                             var candidatoInfo = { testo: testo, linkedin: p.linkedin || null, tipo: tipoAnalisiSelezionato };
                             var salvaCallback = function(nuoviDati) { _salvaAnalisiRicerca(nuoviDati, p); };
                             _mostraReportNelModal(ev.risultato, candidatoInfo, salvaCallback);
                             _salvaAnalisiRicerca(ev.risultato, p);
+                            // Aggiorna status nel card nome-risultato
+                            var nrStatus = document.getElementById('nome-analisi-status');
+                            if (nrStatus && !document.getElementById('nome-risultato').classList.contains('hidden')) {
+                                var sc = ev.risultato.punteggio >= 8 ? '#16a34a' : (ev.risultato.punteggio >= 5 ? '#d97706' : '#dc2626');
+                                nrStatus.innerHTML = '<span style="font-size:1.1rem;font-weight:700;color:' + sc + ';">' +
+                                    ev.risultato.punteggio + '/10</span> <span style="font-size:0.9rem;color:var(--grigio-testo);">\u2014 Analisi completata. Vedi il report nel modal.</span>';
+                            }
                         } else if (ev.type === 'errore') {
                             document.getElementById('modal-report-spinner').style.display = 'none';
                             document.getElementById('modal-report-status').textContent =
@@ -788,7 +897,7 @@ function _salvaAnalisiRicerca(dati, p) {
         var savedEl = document.getElementById('modal-report-saved');
         if (r.status === 409) {
             return r.json().then(function() {
-                savedEl.innerHTML = '&#9888; Candidato già in Pipeline &mdash; <a href="/pipeline">Vedi Pipeline</a>';
+                savedEl.innerHTML = '&#9888; Candidato gi\u00e0 in Pipeline &mdash; <a href="/pipeline">Vedi Pipeline</a>';
                 savedEl.style.cssText = 'background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--radius);' +
                     'padding:0.75rem 1rem;margin-top:1rem;font-size:0.88rem;color:#92400e;display:block;';
             });
@@ -802,7 +911,6 @@ function _salvaAnalisiRicerca(dati, p) {
     })
     .catch(function(err) { console.error('[salva analisi ricerca]', err); });
 }
-
 
 </script>
 {% endblock %}
