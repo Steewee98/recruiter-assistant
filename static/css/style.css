@@ -407,6 +407,7 @@ body {
 .btn {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 0.4rem;
     padding: 0.55rem 1.1rem;
     border-radius: 8px;
@@ -1127,6 +1128,9 @@ body {
     cursor: pointer;
     transition: all 0.15s;
     text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .toggle-mini:hover {
