@@ -140,6 +140,15 @@
 
         <div class="ricerca-card-body">
             <div class="form-group">
+                <label class="form-label">URL LinkedIn <span style="color:var(--grigio-testo);font-weight:400;">(opzionale)</span></label>
+                <input type="text" id="linkedin-url" class="form-input" placeholder="es. linkedin.com/in/mario-rossi">
+            </div>
+            <div style="display:flex;align-items:center;gap:0.75rem;margin:0.5rem 0 0.75rem;">
+                <hr style="flex:1;border:none;border-top:1px solid var(--grigio-bordo);">
+                <span style="color:var(--grigio-testo);font-size:0.75rem;">oppure</span>
+                <hr style="flex:1;border:none;border-top:1px solid var(--grigio-bordo);">
+            </div>
+            <div class="form-group">
                 <label class="form-label">Nome e Cognome</label>
                 <input type="text" id="nome-cognome" class="form-input" placeholder="es. Mario Rossi">
             </div>
@@ -609,9 +618,11 @@ function renderRisultati(persone, totale, tentativi, messaggio) {
 /* Ricerca per Nome                                                     */
 /* ------------------------------------------------------------------ */
 function cercaPerNome() {
-    var nomeCognome = document.getElementById('nome-cognome').value.trim();
-    if (!nomeCognome) {
-        alert('Inserisci nome e cognome.');
+    var linkedinUrl  = document.getElementById('linkedin-url').value.trim();
+    var nomeCognome  = document.getElementById('nome-cognome').value.trim();
+
+    if (!linkedinUrl && !nomeCognome) {
+        alert('Inserisci un URL LinkedIn oppure nome e cognome.');
         return;
     }
 
@@ -624,6 +635,61 @@ function cercaPerNome() {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Ricerca in corso...';
 
+    // Se URL LinkedIn presente: usa EnrichLayer direttamente
+    if (linkedinUrl) {
+        _cercaPerUrl(linkedinUrl, btn);
+    } else {
+        _cercaPerKeyword(nomeCognome, btn);
+    }
+}
+
+function _cercaPerUrl(linkedinUrl, btn) {
+    fetch('/ricerca/cerca_per_url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            linkedin_url: linkedinUrl,
+            tipo_profilo: tipoNomeSelezionato,
+        })
+    })
+    .then(function(r) {
+        if (!r.ok) {
+            return jsonSicuro(r).then(function(d) {
+                throw new Error(d.errore || 'Errore server ' + r.status);
+            });
+        }
+        return jsonSicuro(r);
+    })
+    .then(function(data) {
+        btn.disabled = false;
+        btn.innerHTML = '&#9733; Cerca e Analizza';
+
+        if (data.errore) {
+            alert(data.errore);
+            return;
+        }
+        if (!data.profilo) {
+            alert(data.messaggio || 'Profilo non trovato.');
+            return;
+        }
+
+        var p = data.profilo;
+        ricercaIdCorrente = data.ricerca_id || null;
+
+        _mostraProfiloNome(p);
+
+        // Lancia analisi AI automaticamente
+        tipoAnalisiSelezionato = tipoNomeSelezionato;
+        avviaAnalisiDiretta(p);
+    })
+    .catch(function(err) {
+        btn.disabled = false;
+        btn.innerHTML = '&#9733; Cerca e Analizza';
+        alert('' + err);
+    });
+}
+
+function _cercaPerKeyword(nomeCognome, btn) {
     fetch('/ricerca/cerca_nome', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -658,10 +724,8 @@ function cercaPerNome() {
         var p = data.profilo;
         ricercaIdCorrente = data.ricerca_id || null;
 
-        // Mostra il profilo trovato
         _mostraProfiloNome(p);
 
-        // Lancia analisi AI automaticamente
         tipoAnalisiSelezionato = tipoNomeSelezionato;
         avviaAnalisiDiretta(p);
     })

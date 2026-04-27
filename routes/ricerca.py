@@ -555,6 +555,81 @@ def _nome_corrisponde(cercato: str, nome_profilo: str, cognome_profilo: str) -> 
     return all(parola in profilo_full for parola in cercato_lower)
 
 
+@ricerca_bp.route("/ricerca/cerca_per_url", methods=["POST"])
+def cerca_per_url():
+    """
+    Cerca un profilo LinkedIn direttamente tramite EnrichLayer usando l'URL.
+    Non passa da Apify — recupera i dati arricchiti direttamente.
+    """
+    from proxycurl_helpers import arricchisci_profilo
+
+    dati = request.get_json()
+    linkedin_url = (dati.get("linkedin_url") or "").strip()
+    tipo_profilo = dati.get("tipo_profilo", "A")
+
+    if not linkedin_url:
+        return jsonify({"errore": "URL LinkedIn obbligatorio"}), 400
+
+    # Normalizza URL
+    if not linkedin_url.startswith("http"):
+        linkedin_url = "https://" + linkedin_url
+    # Assicurati che contenga linkedin.com/in/
+    if "linkedin.com/in/" not in linkedin_url:
+        return jsonify({"errore": "URL non valido. Deve contenere linkedin.com/in/..."}), 400
+
+    log.info("CERCA PER URL: %s", linkedin_url)
+    print(f"=== CERCA PER URL: {linkedin_url} ===", flush=True)
+
+    dati_profilo = arricchisci_profilo(linkedin_url)
+    if not dati_profilo:
+        return jsonify({"profilo": None, "messaggio": "Profilo non trovato o EnrichLayer non disponibile. Verifica l'URL."})
+
+    # Azienda corrente dalle esperienze
+    azienda = ""
+    esperienze = dati_profilo.get("experiences") or []
+    if esperienze and isinstance(esperienze[0], dict):
+        azienda = esperienze[0].get("company") or esperienze[0].get("companyName") or ""
+
+    profilo = {
+        "nome":     dati_profilo.get("first_name") or dati_profilo.get("firstName") or "",
+        "cognome":  dati_profilo.get("last_name") or dati_profilo.get("lastName") or "",
+        "ruolo":    dati_profilo.get("headline") or dati_profilo.get("occupation") or "",
+        "azienda":  azienda,
+        "location": dati_profilo.get("city") or dati_profilo.get("country_full_name") or "",
+        "sommario": (dati_profilo.get("summary") or "")[:200],
+        "linkedin": linkedin_url,
+        "tipo_profilo": tipo_profilo,
+    }
+
+    # Salva nella cronologia
+    nome_completo = f"{profilo['nome']} {profilo['cognome']}".strip()
+    parametri_str = json.dumps({'linkedin_url': linkedin_url, 'nome': nome_completo},
+                               ensure_ascii=False)
+    db = get_db()
+    cur = db.execute(
+        """INSERT INTO ricerche_automatiche
+           (tipo_profilo, parametri, profili_trovati, profili_importati, fonte, stato)
+           VALUES (?, ?, 1, 0, 'manuale', 'completata')""",
+        (tipo_profilo, parametri_str)
+    )
+    ricerca_id = cur.lastrowid
+    testo = _costruisci_testo_profilo(profilo)
+    cur_p = db.execute(
+        """INSERT INTO profili_ricerca
+           (ricerca_id, nome, cognome, ruolo, azienda, location, linkedin_url, testo_profilo)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (ricerca_id, profilo["nome"], profilo["cognome"], profilo["ruolo"],
+         profilo["azienda"], profilo["location"], linkedin_url, testo)
+    )
+    profilo["profilo_ricerca_id"] = cur_p.lastrowid
+    profilo["ricerca_id"] = ricerca_id
+    db.commit()
+    db.close()
+
+    print(f"=== CERCA PER URL OK: {nome_completo} — {profilo['ruolo']} ===", flush=True)
+    return jsonify({"profilo": profilo, "ricerca_id": ricerca_id})
+
+
 @ricerca_bp.route("/ricerca/cerca_nome", methods=["POST"])
 def cerca_nome():
     """
