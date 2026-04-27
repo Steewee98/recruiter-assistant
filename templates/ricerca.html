@@ -635,9 +635,9 @@ function cercaPerNome() {
     })
     .then(function(r) {
         if (!r.ok) {
-            return r.json().then(function(d) {
-                throw new Error(d.errore || 'Errore ' + r.status);
-            }).catch(function() { throw new Error('Errore server ' + r.status); });
+            return jsonSicuro(r).then(function(d) {
+                throw new Error(d.errore || 'Errore server ' + r.status);
+            });
         }
         return jsonSicuro(r);
     })
@@ -647,6 +647,11 @@ function cercaPerNome() {
 
         if (data.errore) {
             alert(data.errore);
+            return;
+        }
+
+        if (!data.profilo) {
+            alert(data.messaggio || 'Nessun profilo trovato.');
             return;
         }
 

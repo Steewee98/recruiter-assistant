@@ -639,7 +639,7 @@ def cerca_nome():
         return jsonify({"errore": f"Errore recupero risultati: {str(e)}"}), 500
 
     if not items:
-        return jsonify({"errore": f"Profilo non trovato per '{nome_cognome}'. Prova ad aggiungere l'azienda per una ricerca più precisa."}), 404
+        return jsonify({"profilo": None, "messaggio": f"Nessun profilo trovato per '{nome_cognome}'. Prova ad aggiungere l'azienda per una ricerca più precisa."})
 
     # Cerca il primo profilo che corrisponde al nome
     profilo = None
@@ -652,7 +652,7 @@ def cerca_nome():
     if not profilo:
         nomi_trovati = [f"{normalizza_profilo(i).get('nome','')} {normalizza_profilo(i).get('cognome','')}".strip() for i in items[:3]]
         print(f"=== CERCA NOME: nessuna corrispondenza per '{nome_cognome}', trovati: {nomi_trovati} ===", flush=True)
-        return jsonify({"errore": f"Profilo non trovato per '{nome_cognome}'. Prova ad aggiungere l'azienda per una ricerca più precisa."}), 404
+        return jsonify({"profilo": None, "messaggio": f"Profilo non trovato per '{nome_cognome}'. Prova ad aggiungere l'azienda per una ricerca più precisa."})
 
     profilo["tipo_profilo"] = tipo_profilo
 
