@@ -542,12 +542,25 @@ def index():
                            cronologia=cronologia)
 
 
+def _nome_corrisponde(cercato: str, nome_profilo: str, cognome_profilo: str) -> bool:
+    """
+    Verifica che il profilo restituito corrisponda al nome cercato.
+    Confronto case-insensitive. Accetta corrispondenza parziale:
+    ogni parola del nome cercato deve essere presente nel nome completo del profilo.
+    """
+    cercato_lower = cercato.lower().split()
+    profilo_full  = f"{nome_profilo} {cognome_profilo}".lower()
+    if not cercato_lower:
+        return False
+    return all(parola in profilo_full for parola in cercato_lower)
+
+
 @ricerca_bp.route("/ricerca/cerca_nome", methods=["POST"])
 def cerca_nome():
     """
     Cerca un profilo specifico su LinkedIn per nome e cognome.
-    Usa Apify con keywords=nome+cognome senza currentJobTitles.
-    Restituisce il primo risultato trovato.
+    Usa searchKeywords con nome tra virgolette per ricerca esatta.
+    Verifica che il risultato corrisponda al nome cercato.
     """
     dati = request.get_json()
     nome_cognome = (dati.get("nome_cognome") or "").strip()
@@ -561,19 +574,19 @@ def cerca_nome():
     if not api_key:
         return jsonify({"errore": "APIFY_API_KEY non configurata"}), 500
 
-    # Costruisci input Apify: solo keywords, niente currentJobTitles
+    # searchKeywords con nome tra virgolette per ricerca esatta
+    search_kw = f'"{nome_cognome}"'
+    if azienda:
+        search_kw += f" {azienda}"
+
     run_input = {
-        "takePages": 1,
-        "startPage": 1,
         "maxItems": 5,
-        "keywords": nome_cognome,
+        "searchKeywords": search_kw,
         "locations": ["Italy"],
     }
-    if azienda:
-        run_input["currentCompanies"] = [azienda]
 
     log.info("CERCA NOME: input=%s", json.dumps(run_input, ensure_ascii=False))
-    print(f"=== CERCA NOME: {nome_cognome} (azienda={azienda}) ===", flush=True)
+    print(f"=== CERCA NOME: {nome_cognome} (azienda={azienda}) searchKeywords={search_kw} ===", flush=True)
 
     # Avvia run Apify
     try:
@@ -626,10 +639,21 @@ def cerca_nome():
         return jsonify({"errore": f"Errore recupero risultati: {str(e)}"}), 500
 
     if not items:
-        return jsonify({"errore": "Nessun profilo trovato per questo nome"}), 404
+        return jsonify({"errore": f"Profilo non trovato per '{nome_cognome}'. Prova ad aggiungere l'azienda per una ricerca più precisa."}), 404
 
-    # Normalizza e restituisci il primo profilo
-    profilo = normalizza_profilo(items[0])
+    # Cerca il primo profilo che corrisponde al nome
+    profilo = None
+    for item in items:
+        p = normalizza_profilo(item)
+        if _nome_corrisponde(nome_cognome, p.get("nome", ""), p.get("cognome", "")):
+            profilo = p
+            break
+
+    if not profilo:
+        nomi_trovati = [f"{normalizza_profilo(i).get('nome','')} {normalizza_profilo(i).get('cognome','')}".strip() for i in items[:3]]
+        print(f"=== CERCA NOME: nessuna corrispondenza per '{nome_cognome}', trovati: {nomi_trovati} ===", flush=True)
+        return jsonify({"errore": f"Profilo non trovato per '{nome_cognome}'. Prova ad aggiungere l'azienda per una ricerca più precisa."}), 404
+
     profilo["tipo_profilo"] = tipo_profilo
 
     # Salva nella cronologia
