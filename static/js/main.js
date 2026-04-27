@@ -114,7 +114,10 @@ function scartaProfilo(p, btn) {
             motivo:   'non_importato'
         })
     })
-    .then(function(r) { return r.json(); })
+    .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    })
     .then(function(data) {
         if (data.successo) {
             var riga = btn.closest('tr');
@@ -126,12 +129,13 @@ function scartaProfilo(p, btn) {
             mostraToast('Profilo scartato — non verrà più proposto');
         } else {
             btn.disabled = false;
-            alert('Errore durante lo scarto del profilo.');
+            mostraToast('Errore: impossibile scartare il profilo');
         }
     })
     .catch(function(err) {
         btn.disabled = false;
         console.error('[scarta]', err);
+        mostraToast('Errore di connessione — riprova');
     });
 }
 

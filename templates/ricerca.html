@@ -526,17 +526,22 @@ function cercaFigure() {
     });
 }
 
+// Lookup globale profili: evita di mettere JSON inline negli onclick (rompe con apostrofi)
+var _profiliRicerca = [];
+
 function renderRisultati(persone, totale, tentativi, messaggio) {
     tentativi = tentativi || 1;
     messaggio = messaggio || '';
     const tbody = document.getElementById('risultati-tbody');
     tbody.innerHTML = '';
+    _profiliRicerca = [];  // reset ad ogni nuova ricerca
 
     // Mostra SOLO profili non ancora in pipeline — quelli già presenti non appaiono mai
     const nuovi      = persone.filter(function(p) { return !p.gia_in_pipeline; });
     const giPresenti = persone.filter(function(p) { return  p.gia_in_pipeline; });
 
-    nuovi.forEach(function(p) {
+    nuovi.forEach(function(p, i) {
+        _profiliRicerca.push(p);  // salva il profilo nell'array globale
         const nomeCompleto = [p.nome, p.cognome].filter(Boolean).join(' ') || '—';
         const location = p.location || '—';
         const linkedinBtn = p.linkedin
@@ -553,9 +558,9 @@ function renderRisultati(persone, totale, tentativi, messaggio) {
             '<td>' + escHtml(location) + '</td>' +
             '<td>' + linkedinBtn + '</td>' +
             '<td style="display:flex;gap:0.4rem;">' +
-            '<button class="btn btn-outline btn-xs" onclick=\'apriModal(' + JSON.stringify(p) + ')\'>&#43; Importa</button>' +
-            '<button class="btn btn-primary btn-xs" onclick=\'avviaAnalisiDiretta(' + JSON.stringify(p) + ')\'>&#9733; Analizza</button>' +
-            '<button class="btn btn-outline btn-xs" style="color:#c0392b;border-color:#c0392b;" onclick=\'scartaProfilo(' + JSON.stringify(p) + ', this)\'>&#10005; Scarta</button>' +
+            '<button class="btn btn-outline btn-xs" onclick="apriModal(_profiliRicerca[' + i + '])">&#43; Importa</button>' +
+            '<button class="btn btn-primary btn-xs" onclick="avviaAnalisiDiretta(_profiliRicerca[' + i + '])">&#9733; Analizza</button>' +
+            '<button class="btn btn-outline btn-xs" style="color:#c0392b;border-color:#c0392b;" onclick="scartaProfilo(_profiliRicerca[' + i + '], this)">&#10005; Scarta</button>' +
             '</td>' +
             '</tr>';
     });
