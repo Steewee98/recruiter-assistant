@@ -75,15 +75,15 @@ def is_duplicate(db, profilo: dict) -> tuple:
             if _normalize_linkedin(row["linkedin_url"] or "") == linkedin_norm:
                 return True, "Profilo scartato (blacklist LinkedIn)", None
 
-    if nome and cognome and azienda:
+    if nome and cognome:
+        # Blacklist: nome+cognome è sufficiente (evita falsi negativi per azienda diversa)
         row = db.execute(
             "SELECT id FROM profili_scartati "
-            "WHERE LOWER(TRIM(nome))=? AND LOWER(TRIM(cognome))=? "
-            "AND LOWER(TRIM(azienda))=?",
-            (nome, cognome, azienda),
+            "WHERE LOWER(TRIM(nome))=? AND LOWER(TRIM(cognome))=?",
+            (nome, cognome),
         ).fetchone()
         if row:
-            return True, f"Profilo scartato (blacklist nome+azienda: {nome} {cognome} @ {azienda})", None
+            return True, f"Profilo scartato (blacklist nome: {nome} {cognome})", None
 
     # ── 1. LinkedIn URL in candidati ──────────────────────────────────────────
     if linkedin:
@@ -96,7 +96,7 @@ def is_duplicate(db, profilo: dict) -> tuple:
             if _normalize_linkedin(row["profilo_linkedin"]) == linkedin_norm:
                 return True, "URL LinkedIn già presente", row["id"]
 
-    # ── 2. nome + cognome + azienda ───────────────────────────────────────────
+    # ── 2. nome + cognome + azienda (match esatto) ───────────────────────────
     if nome and cognome and azienda:
         row = db.execute(
             "SELECT id FROM candidati "
@@ -117,5 +117,18 @@ def is_duplicate(db, profilo: dict) -> tuple:
         ).fetchone()
         if row:
             return True, f"Nome+ruolo già presenti ({nome} {cognome} — {ruolo})", row["id"]
+
+    # ── 4. nome + cognome soli (catch-all) ────────────────────────────────────
+    # Cattura profili con azienda/ruolo diversi (es. "Fideuram" vs
+    # "Fideuram - Intesa Sanpaolo Private Banking"). Rischio di falsi
+    # positivi basso nel contesto recruiting di nicchia.
+    if nome and cognome:
+        row = db.execute(
+            "SELECT id FROM candidati "
+            "WHERE LOWER(TRIM(nome))=? AND LOWER(TRIM(cognome))=?",
+            (nome, cognome),
+        ).fetchone()
+        if row:
+            return True, f"Nome+cognome già presenti ({nome} {cognome})", row["id"]
 
     return False, "", None

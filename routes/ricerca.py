@@ -632,6 +632,7 @@ def cerca():
             p["candidato_id_esistente"] = cand_id
 
             nome_log = f"{p.get('nome','')} {p.get('cognome','')}".strip() or "?"
+            print(f"  DEDUP: {nome_log} | linkedin={p.get('linkedin','—')[:50]} | dup={dup} | motivo={motivo_dup}", flush=True)
             log.info("  Profilo %s: linkedin=%s — già in DB: %s%s",
                      nome_log, p.get("linkedin", "—"),
                      "SI" if dup else "NO",
