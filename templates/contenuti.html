@@ -3,134 +3,160 @@
 
 {% block content %}
 <div class="page-header">
-    <h1 class="page-title">Creazione Contenuti LinkedIn</h1>
-    <p class="page-subtitle">Genera 3 varianti di post con intelligenza artificiale</p>
+    <h1 class="page-title">Contenuti LinkedIn</h1>
+    <p class="page-subtitle">Crea post coinvolgenti guidato passo dopo passo</p>
 </div>
 
-<div class="contenuti-layout">
+<div class="contenuti-wizard">
 
-    <!-- Form generazione -->
-    <div class="card">
-        <div class="card-body">
-
-            <!-- Tema -->
-            <div class="form-group">
-                <label class="form-label" for="tema">Tema del Post <span class="required">*</span></label>
-                <input type="text" id="tema" class="form-input"
-                       placeholder="Es. L'importanza della consulenza finanziaria indipendente">
+    <!-- SEZIONE 1 — Chi pubblica -->
+    <div class="wizard-section">
+        <div class="wizard-section-header">
+            <span class="wizard-step-num">1</span>
+            <div>
+                <h2 class="wizard-section-title">Chi pubblica</h2>
+                <p class="wizard-section-desc">Seleziona il profilo che pubblicherà il post</p>
             </div>
-
-            <!-- Tono -->
-            <div class="form-group">
-                <label class="form-label">Tono del Contenuto</label>
-                <div class="tono-grid">
-                    <label class="toggle-option selected" id="tono-professionale">
-                        <input type="radio" name="tono" value="professionale" checked>
-                        <div class="toggle-content">
-                            <span class="toggle-badge">Professionale</span>
-                            <span class="toggle-desc">Formale, dati e risultati</span>
-                        </div>
-                    </label>
-                    <label class="toggle-option" id="tono-ispirazionale">
-                        <input type="radio" name="tono" value="ispirazionale">
-                        <div class="toggle-content">
-                            <span class="toggle-badge">Ispirazionale</span>
-                            <span class="toggle-desc">Motivante, storie ed emozioni</span>
-                        </div>
-                    </label>
-                    <label class="toggle-option" id="tono-educativo">
-                        <input type="radio" name="tono" value="educativo">
-                        <div class="toggle-content">
-                            <span class="toggle-badge">Educativo</span>
-                            <span class="toggle-desc">Informativo, valore pratico</span>
-                        </div>
-                    </label>
+        </div>
+        <div class="profilo-cards">
+            <label class="profilo-card selected" data-profilo="Salvatore Sabia">
+                <input type="radio" name="profilo" value="Salvatore Sabia" checked>
+                <div class="profilo-card-avatar">SS</div>
+                <div class="profilo-card-info">
+                    <span class="profilo-card-nome">Salvatore Sabia</span>
+                    <span class="profilo-card-ruolo">Regional Manager Fideuram</span>
                 </div>
-            </div>
-
-            <!-- Profilo destinazione -->
-            <div class="form-group">
-                <label class="form-label">Scritto da</label>
-                <div class="profilo-toggle">
-                    <label class="toggle-option selected" id="profilo-salvatore">
-                        <input type="radio" name="profilo" value="Salvatore Sabia" checked>
-                        <div class="toggle-content">
-                            <span class="toggle-badge">Salvatore Sabia</span>
-                            <span class="toggle-desc">Imprenditore, consulente finanziario</span>
-                        </div>
-                    </label>
-                    <label class="toggle-option" id="profilo-assistente">
-                        <input type="radio" name="profilo" value="Assistente Recrutatrice">
-                        <div class="toggle-content">
-                            <span class="toggle-badge">Assistente Recrutatrice</span>
-                            <span class="toggle-desc">Specialista recruiting bancario</span>
-                        </div>
-                    </label>
+                <span class="profilo-card-check">&#10003;</span>
+            </label>
+            <label class="profilo-card" data-profilo="Firdaous Filahi">
+                <input type="radio" name="profilo" value="Firdaous Filahi">
+                <div class="profilo-card-avatar ff">FF</div>
+                <div class="profilo-card-info">
+                    <span class="profilo-card-nome">Firdaous Filahi</span>
+                    <span class="profilo-card-ruolo">Recruiter Bancario</span>
                 </div>
-            </div>
-
-            <button id="btn-genera" class="btn btn-primary btn-lg" onclick="generaContenuti()">
-                <span id="btn-genera-testo">&#9998; Genera 3 Varianti</span>
-                <span id="btn-genera-loading" class="hidden">
-                    <span class="spinner"></span> Generazione in corso...
-                </span>
-            </button>
+                <span class="profilo-card-check">&#10003;</span>
+            </label>
         </div>
     </div>
 
-    <!-- Risultati varianti -->
-    <div id="varianti-container" class="hidden">
-        <div class="varianti-grid">
-            {% for i in range(1, 4) %}
-            <div class="card variante-card">
-                <div class="card-header">
-                    <h3>Variante {{ i }}</h3>
-                    <div style="display:flex;gap:0.4rem;">
-                        <button class="btn btn-outline btn-sm"
-                                onclick="copiaVariante({{ i }})">Copia testo</button>
-                        <button class="btn btn-secondary btn-sm" id="btn-visual-{{ i }}"
-                                onclick="generaImmagine({{ i }})">
-                            <span id="visual-testo-{{ i }}">&#128444; Genera Visual</span>
-                            <span id="visual-loading-{{ i }}" class="hidden"><span class="spinner" style="border-top-color:var(--azzurro);border-color:rgba(46,124,246,0.3)"></span></span>
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div id="variante-{{ i }}" class="post-preview"></div>
-                    <!-- Area immagine generata -->
-                    <div id="visual-container-{{ i }}" class="hidden" style="margin-top:1.25rem;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
-                            <span style="font-size:0.8rem;font-weight:600;color:var(--grigio-testo);text-transform:uppercase;letter-spacing:0.05em;">Visual LinkedIn</span>
-                            <a id="visual-download-{{ i }}" class="btn btn-outline btn-xs" download="visual-variante-{{ i }}.jpg" target="_blank">&#8595; Scarica</a>
-                        </div>
-                        <!-- Immagine generata -->
-                        <img id="visual-img-{{ i }}" src="" alt="Visual LinkedIn"
-                             style="width:100%;border-radius:8px;box-shadow:var(--shadow);display:block;">
-                        <!-- Prompt usato -->
-                        <p id="visual-prompt-{{ i }}" style="font-size:0.75rem;color:var(--grigio-testo);margin-top:0.5rem;font-style:italic;"></p>
-                        <!-- Barra modifica prompt -->
-                        <div style="display:flex;gap:0.5rem;margin-top:0.75rem;align-items:flex-end;">
-                            <div class="form-group" style="flex:1;margin-bottom:0;">
-                                <input type="text" id="prompt-custom-{{ i }}" class="form-input"
-                                       placeholder="Es: più minimalista, tonalità calde, stile corporate...">
-                            </div>
-                            <button class="btn btn-secondary btn-sm" onclick="generaImmagine({{ i }})">
-                                &#8635; Rigenera
-                            </button>
-                        </div>
-                    </div>
-                </div>
+    <!-- SEZIONE 2 — Il post -->
+    <div class="wizard-section">
+        <div class="wizard-section-header">
+            <span class="wizard-step-num">2</span>
+            <div>
+                <h2 class="wizard-section-title">Il post</h2>
+                <p class="wizard-section-desc">Definisci obiettivo, argomento e tono</p>
             </div>
-            {% endfor %}
+        </div>
+
+        <!-- Blocco A — Obiettivo -->
+        <div class="wizard-block">
+            <label class="wizard-block-label">Obiettivo del post</label>
+            <div class="obiettivo-grid">
+                <button type="button" class="obiettivo-btn selected" data-val="attirare_candidati">
+                    <span class="obiettivo-emoji">&#127919;</span>
+                    <span class="obiettivo-text">Attirare candidati</span>
+                </button>
+                <button type="button" class="obiettivo-btn" data-val="insight">
+                    <span class="obiettivo-emoji">&#128161;</span>
+                    <span class="obiettivo-text">Condividere un insight</span>
+                </button>
+                <button type="button" class="obiettivo-btn" data-val="caso_successo">
+                    <span class="obiettivo-emoji">&#127942;</span>
+                    <span class="obiettivo-text">Caso di successo</span>
+                </button>
+                <button type="button" class="obiettivo-btn" data-val="educare">
+                    <span class="obiettivo-emoji">&#128218;</span>
+                    <span class="obiettivo-text">Educare il pubblico</span>
+                </button>
+                <button type="button" class="obiettivo-btn" data-val="autorevolezza">
+                    <span class="obiettivo-emoji">&#11088;</span>
+                    <span class="obiettivo-text">Costruire autorevolezza</span>
+                </button>
+                <button type="button" class="obiettivo-btn" data-val="racconto">
+                    <span class="obiettivo-emoji">&#128172;</span>
+                    <span class="obiettivo-text">Racconto personale</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Blocco B — Tema -->
+        <div class="wizard-block">
+            <label class="wizard-block-label" for="tema">Di cosa vuoi parlare? <span class="required">*</span></label>
+            <input type="text" id="tema" class="form-input"
+                   placeholder="es. Come ho costruito il mio team, Perché ho scelto Fideuram...">
+        </div>
+
+        <!-- Blocco C — Contesto aggiuntivo -->
+        <div class="wizard-block">
+            <label class="wizard-block-label" for="contesto">
+                Contesto aggiuntivo <span class="wizard-optional">(opzionale)</span>
+            </label>
+            <textarea id="contesto" class="form-textarea" rows="3"
+                      placeholder="Aggiungi dettagli, aneddoti, numeri specifici che vuoi includere nel post..."></textarea>
+        </div>
+
+        <!-- Blocco D — Tono -->
+        <div class="wizard-block">
+            <label class="wizard-block-label">Tono del post</label>
+            <div class="tono-buttons">
+                <button type="button" class="tono-btn" data-val="relazionale">
+                    <span>&#129309;</span> Relazionale
+                </button>
+                <button type="button" class="tono-btn selected" data-val="professionale">
+                    <span>&#128188;</span> Professionale
+                </button>
+                <button type="button" class="tono-btn" data-val="diretto">
+                    <span>&#128293;</span> Diretto e provocatorio
+                </button>
+            </div>
         </div>
     </div>
+
+    <!-- BOTTONE GENERA -->
+    <button id="btn-genera" class="btn-genera-main" onclick="generaContenuti()">
+        <span id="btn-genera-testo">&#10024; Genera 3 Varianti</span>
+        <span id="btn-genera-loading" class="hidden">
+            <span class="spinner"></span> Generazione in corso...
+        </span>
+    </button>
 
     <!-- Errore -->
     <div id="errore-contenuti" class="hidden alert alert-errore"></div>
 
 </div>
 
-<!-- Storico contenuti generati -->
+<!-- RISULTATI -->
+<div id="varianti-container" class="hidden">
+    <div class="varianti-risultati-header">
+        <h2>Le tue 3 varianti</h2>
+        <p>Scegli quella che preferisci, copiala o salvala</p>
+    </div>
+    <div class="varianti-grid-new">
+        {% for i in range(1, 4) %}
+        <div class="variante-card-new">
+            <div class="variante-card-top">
+                <span class="variante-num">Variante {{ i }}</span>
+                <span class="variante-badge" id="badge-{{ i }}"></span>
+            </div>
+            <div class="variante-card-body">
+                <div id="variante-{{ i }}" class="post-preview"></div>
+            </div>
+            <div class="variante-card-footer">
+                <button class="btn btn-outline btn-sm" onclick="copiaVariante({{ i }})">
+                    &#128203; Copia
+                </button>
+                <button class="btn btn-primary btn-sm" onclick="usaVariante({{ i }})">
+                    &#10003; Usa questo
+                </button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Storico -->
 {% if storico %}
 <div class="card" style="margin-top: 2rem;">
     <div class="card-header">
@@ -143,6 +169,9 @@
                 <div class="storico-meta">
                     <span class="badge">{{ s.tono }}</span>
                     <span class="badge badge-outline">{{ s.profilo_destinazione }}</span>
+                    {% if s.obiettivo %}
+                    <span class="badge badge-outline">{{ s.obiettivo }}</span>
+                    {% endif %}
                     <span class="text-muted">{{ s.data_creazione[:10] }}</span>
                 </div>
                 <div class="storico-tema">{{ s.tema }}</div>
@@ -156,138 +185,126 @@
 
 {% block scripts %}
 <script>
-// Gestione toggle tono
-document.querySelectorAll('input[name="tono"]').forEach(radio => {
-    radio.addEventListener('change', function() {
-        document.querySelectorAll('#tono-professionale, #tono-ispirazionale, #tono-educativo')
-            .forEach(el => el.classList.remove('selected'));
-        this.closest('.toggle-option').classList.add('selected');
+// ── Placeholder dinamici per profilo ──
+var placeholders = {
+    'Salvatore Sabia': 'es. Come ho costruito il mio team, Perché ho scelto Fideuram...',
+    'Firdaous Filahi': 'es. Il primo colloquio che mi ha sorpreso, Come valuto un candidato...'
+};
+
+// ── Selezione profilo ──
+document.querySelectorAll('.profilo-card').forEach(function(card) {
+    card.addEventListener('click', function() {
+        document.querySelectorAll('.profilo-card').forEach(function(c) { c.classList.remove('selected'); });
+        card.classList.add('selected');
+        var profilo = card.querySelector('input[name="profilo"]').value;
+        document.getElementById('tema').placeholder = placeholders[profilo] || '';
     });
 });
 
-// Gestione toggle profilo
-document.querySelectorAll('input[name="profilo"]').forEach(radio => {
-    radio.addEventListener('change', function() {
-        document.querySelectorAll('#profilo-salvatore, #profilo-assistente')
-            .forEach(el => el.classList.remove('selected'));
-        this.closest('.toggle-option').classList.add('selected');
+// ── Selezione obiettivo (singola) ──
+document.querySelectorAll('.obiettivo-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.obiettivo-btn').forEach(function(b) { b.classList.remove('selected'); });
+        btn.classList.add('selected');
     });
 });
 
+// ── Selezione tono (singola) ──
+document.querySelectorAll('.tono-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.tono-btn').forEach(function(b) { b.classList.remove('selected'); });
+        btn.classList.add('selected');
+    });
+});
+
+// ── Nomi tono per badge ──
+var toniLabel = {
+    'relazionale': '&#129309; Relazionale',
+    'professionale': '&#128188; Professionale',
+    'diretto': '&#128293; Diretto'
+};
+
+// ── Genera contenuti ──
 async function generaContenuti() {
-    const tema = document.getElementById('tema').value.trim();
-    const tono = document.querySelector('input[name="tono"]:checked').value;
-    const profilo = document.querySelector('input[name="profilo"]:checked').value;
+    var tema = document.getElementById('tema').value.trim();
+    var contesto = document.getElementById('contesto').value.trim();
+    var profilo = document.querySelector('input[name="profilo"]:checked').value;
+    var obiettivoEl = document.querySelector('.obiettivo-btn.selected');
+    var obiettivo = obiettivoEl ? obiettivoEl.dataset.val : 'attirare_candidati';
+    var tonoEl = document.querySelector('.tono-btn.selected');
+    var tono = tonoEl ? tonoEl.dataset.val : 'professionale';
 
     if (!tema) {
-        document.getElementById('errore-contenuti').textContent = 'Inserire il tema del post.';
+        document.getElementById('errore-contenuti').textContent = 'Inserisci l\'argomento del post.';
         mostra('errore-contenuti');
         return;
     }
 
     nascondi('errore-contenuti');
     nascondi('varianti-container');
-    impostaCaricamentoContenuti(true);
+    impostaCaricamento(true);
 
     try {
-        const risposta = await fetch('/contenuti/genera', {
+        var risposta = await fetch('/contenuti/genera', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tema, tono, profilo })
+            body: JSON.stringify({ tema: tema, tono: tono, profilo: profilo, obiettivo: obiettivo, contesto: contesto })
         });
 
-        const dati = await jsonSicuro(risposta);
-
+        var dati = await jsonSicuro(risposta);
         if (!risposta.ok) throw new Error(dati.errore || 'Errore nella generazione');
 
-        // Mostra le 3 varianti
-        for (let i = 1; i <= 3; i++) {
-            const testo = dati[`variante_${i}`] || '';
-            const el = document.getElementById(`variante-${i}`);
-            // Converti \n in <br> per la visualizzazione
+        // Popola le 3 varianti
+        for (var i = 1; i <= 3; i++) {
+            var testo = dati['variante_' + i] || '';
+            var el = document.getElementById('variante-' + i);
             el.innerHTML = testo.replace(/\n/g, '<br>');
-            el.dataset.testo = testo; // salva testo originale per la copia
+            el.dataset.testo = testo;
+            // Badge tono
+            document.getElementById('badge-' + i).innerHTML = toniLabel[tono] || tono;
         }
 
         mostra('varianti-container');
-        document.getElementById('varianti-container').scrollIntoView({ behavior: 'smooth' });
+        document.getElementById('varianti-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     } catch (err) {
         document.getElementById('errore-contenuti').textContent = 'Errore: ' + err.message;
         mostra('errore-contenuti');
     } finally {
-        impostaCaricamentoContenuti(false);
+        impostaCaricamento(false);
     }
 }
 
 function copiaVariante(num) {
-    const el = document.getElementById(`variante-${num}`);
-    const testo = el.dataset.testo || el.textContent;
-    navigator.clipboard.writeText(testo).then(() => {
-        const btn = event.target;
-        btn.textContent = 'Copiato!';
-        setTimeout(() => btn.textContent = 'Copia', 2000);
+    var el = document.getElementById('variante-' + num);
+    var testo = el.dataset.testo || el.textContent;
+    navigator.clipboard.writeText(testo).then(function() {
+        var btn = event.target.closest('.btn');
+        var orig = btn.innerHTML;
+        btn.innerHTML = '&#10003; Copiato!';
+        btn.classList.remove('btn-outline');
+        btn.classList.add('btn-primary');
+        setTimeout(function() {
+            btn.innerHTML = orig;
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-outline');
+        }, 2000);
     });
 }
 
-async function generaImmagine(num) {
-    const testoEl = document.getElementById(`variante-${num}`);
-    const testo = testoEl.dataset.testo || testoEl.textContent;
-    if (!testo) return;
-
-    const btn = document.getElementById(`btn-visual-${num}`);
-    btn.disabled = true;
-    document.getElementById(`visual-testo-${num}`).classList.add('hidden');
-    document.getElementById(`visual-loading-${num}`).classList.remove('hidden');
-
-    // Nascondi immagine precedente durante il caricamento
-    document.getElementById(`visual-img-${num}`).style.opacity = '0.3';
-
-    try {
-        const resp = await fetch('/contenuti/genera_immagine', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                testo_post: testo,
-                tema: document.getElementById('tema').value.trim(),
-                tono: document.querySelector('input[name="tono"]:checked').value,
-                profilo: document.querySelector('input[name="profilo"]:checked').value,
-                prompt_custom: document.getElementById(`prompt-custom-${num}`).value.trim(),
-            })
-        });
-        const dati = await jsonSicuro(resp);
-        if (dati.errore) { alert('Errore: ' + dati.errore); return; }
-
-        // Imposta l'immagine — Pollinations la genera al caricamento
-        const img = document.getElementById(`visual-img-${num}`);
-        img.style.opacity = '0.3';
-        img.onload = function() { this.style.opacity = '1'; };
-        img.onerror = function() { this.style.opacity = '1'; };
-        img.src = dati.url;
-
-        // Link download
-        document.getElementById(`visual-download-${num}`).href = dati.url;
-
-        // Mostra prompt usato
-        document.getElementById(`visual-prompt-${num}`).textContent = '🎨 Prompt: ' + dati.prompt;
-
-        document.getElementById(`visual-container-${num}`).classList.remove('hidden');
-        document.getElementById(`visual-testo-${num}`).textContent = '&#128444; Rigenera';
-        // Svuota il campo prompt custom dopo la rigenerazione
-        document.getElementById(`prompt-custom-${num}`).value = '';
-
-    } catch(e) {
-        alert('Errore generazione immagine: ' + e);
-    } finally {
-        btn.disabled = false;
-        document.getElementById(`visual-testo-${num}`).classList.remove('hidden');
-        document.getElementById(`visual-loading-${num}`).classList.add('hidden');
-        document.getElementById(`visual-img-${num}`).style.opacity = '1';
-    }
+function usaVariante(num) {
+    var el = document.getElementById('variante-' + num);
+    var testo = el.dataset.testo || el.textContent;
+    navigator.clipboard.writeText(testo).then(function() {
+        // Evidenzia la card selezionata
+        document.querySelectorAll('.variante-card-new').forEach(function(c) { c.classList.remove('variante-selected'); });
+        el.closest('.variante-card-new').classList.add('variante-selected');
+        mostraToast('Post copiato negli appunti');
+    });
 }
 
-function impostaCaricamentoContenuti(attivo) {
-    const btn = document.getElementById('btn-genera');
+function impostaCaricamento(attivo) {
+    var btn = document.getElementById('btn-genera');
     btn.disabled = attivo;
     document.getElementById('btn-genera-testo').classList.toggle('hidden', attivo);
     document.getElementById('btn-genera-loading').classList.toggle('hidden', !attivo);

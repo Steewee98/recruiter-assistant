@@ -320,6 +320,10 @@ def init_db():
         # Gestore candidato
         "ALTER TABLE candidati ADD COLUMN IF NOT EXISTS gestore TEXT DEFAULT 'Non assegnato'",
 
+        # Contenuti LinkedIn: nuovi campi wizard
+        "ALTER TABLE contenuti_linkedin ADD COLUMN IF NOT EXISTS obiettivo TEXT DEFAULT ''",
+        "ALTER TABLE contenuti_linkedin ADD COLUMN IF NOT EXISTS contesto TEXT DEFAULT ''",
+
         # Arricchimento Proxycurl
         "ALTER TABLE candidati   ADD COLUMN IF NOT EXISTS dati_proxycurl TEXT",
         "ALTER TABLE candidati   ADD COLUMN IF NOT EXISTS dati_arricchiti TEXT",

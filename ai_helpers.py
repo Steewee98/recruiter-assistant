@@ -593,34 +593,64 @@ def genera_prompt_immagine(testo_post: str, tema: str, tono: str, prompt_custom:
     return risposta.content[0].text.strip()
 
 
-def genera_contenuti_linkedin(tema: str, tono: str, profilo: str) -> dict:
-    """Genera 3 varianti di post LinkedIn."""
-    descrizioni_tono = {
-        "professionale": "formale, autorevole, basato su dati e risultati concreti",
-        "ispirazionale": "motivante, emotivo, con storie e metafore, che spinge all'azione",
-        "educativo":     "informativo, chiaro, che insegna qualcosa di valore al lettore",
-    }
-    descrizioni_profilo = {
+def genera_contenuti_linkedin(tema: str, tono: str, profilo: str,
+                               obiettivo: str = "", contesto: str = "") -> dict:
+    """Genera 3 varianti di post LinkedIn con tono di voce personalizzato per profilo."""
+    # Tono di voce distinto per ogni profilo
+    profili_voce = {
         "Salvatore Sabia": (
-            "Salvatore Sabia, imprenditore nel settore della consulenza finanziaria, "
-            "con anni di esperienza nella selezione di professionisti del mondo bancario."
+            "Salvatore Sabia, Regional Manager Fideuram. "
+            "Tono autorevole e riflessivo, con esperienza decennale nel settore finanziario. "
+            "Parla di leadership, crescita professionale e visione strategica. "
+            "Scrive come un leader che condivide la propria esperienza per ispirare."
         ),
-        "Assistente Recrutatrice": (
-            "Assistente recrutatrice specializzata nel settore bancario-finanziario, "
-            "che aiuta professionisti a trovare nuove opportunita di crescita."
+        "Firdaous Filahi": (
+            "Firdaous Filahi, recruiter specializzata nel settore bancario. "
+            "Tono autentico e in evoluzione, ex bancaria ora recruiter. "
+            "Parla la lingua di chi lavora in banca, con un tono da pari a pari. "
+            "Scrive come qualcuno che capisce davvero il percorso dei professionisti bancari."
         ),
+    }
+    descrizioni_tono = {
+        "relazionale": "caldo, empatico, che crea connessione e invita al dialogo",
+        "professionale": "autorevole, preciso, basato su dati e risultati concreti",
+        "diretto": "diretto e provocatorio, che sfida lo status quo e fa riflettere",
+    }
+    obiettivi_desc = {
+        "attirare_candidati": "Attirare professionisti bancari verso nuove opportunita di carriera in Fideuram",
+        "insight": "Condividere un'intuizione o riflessione sul settore bancario/finanziario",
+        "caso_successo": "Raccontare un caso di successo concreto (senza nomi reali) nel recruiting bancario",
+        "educare": "Educare il pubblico su un tema del settore finanziario o del recruiting",
+        "autorevolezza": "Costruire autorevolezza e posizionamento come esperto del settore",
+        "racconto": "Condividere un racconto personale o un'esperienza di vita professionale",
     }
 
+    voce = profili_voce.get(profilo, profilo)
+    desc_tono = descrizioni_tono.get(tono, tono)
+    desc_obiettivo = obiettivi_desc.get(obiettivo, obiettivo) if obiettivo else ""
+
     prompt = (
-        "Sei un esperto di content marketing LinkedIn nel settore finanziario.\n\n"
+        "Sei un esperto di content marketing LinkedIn nel settore del recruiting bancario "
+        "e della consulenza finanziaria.\n\n"
         "Scrivi 3 varianti di post LinkedIn con queste caratteristiche:\n"
+        f"- Autore (scrivi in prima persona): {voce}\n"
+        f"- Obiettivo: {desc_obiettivo}\n"
         f"- Tema: {tema}\n"
-        f"- Tono: {descrizioni_tono.get(tono, tono)}\n"
-        f"- Scritto in prima persona da: {descrizioni_profilo.get(profilo, profilo)}\n\n"
+        f"- Tono: {desc_tono}\n"
+    )
+    if contesto:
+        prompt += f"- Contesto aggiuntivo: {contesto}\n"
+    prompt += (
+        "\nContesto di fondo: il progetto e Fideuram / recruiting bancario. "
+        "Salvatore Sabia e Regional Manager e cerca di attrarre professionisti dalla banca. "
+        "Firdaous Filahi e la recruiter che supporta il processo.\n\n"
         "Ogni post deve avere:\n"
         "1. Un HOOK d'apertura forte (prima riga che cattura l'attenzione)\n"
-        "2. Un CORPO con il messaggio principale\n"
-        "3. Una CALL TO ACTION finale\n\n"
+        "2. Un CORPO con il messaggio principale (usa paragrafi brevi, frasi d'impatto)\n"
+        "3. Una CALL TO ACTION finale\n"
+        "4. Massimo 3-5 hashtag pertinenti alla fine\n\n"
+        "Lunghezza ideale: 800-1200 caratteri per variante.\n"
+        "Le 3 varianti devono essere DIVERSE tra loro nello stile e nell'approccio.\n\n"
         "Fornisci il risultato ESCLUSIVAMENTE in questo formato JSON valido:\n"
         "{\n"
         '  "variante_1": "<testo completo del post 1, con a capo come \\n>",\n'
@@ -631,7 +661,7 @@ def genera_contenuti_linkedin(tema: str, tono: str, profilo: str) -> dict:
 
     payload = {
         "model":      CLAUDE_MODEL,
-        "max_tokens": 2000,
+        "max_tokens": 3000,
         "messages":   [{"role": "user", "content": clean_text(prompt)}],
     }
     try:

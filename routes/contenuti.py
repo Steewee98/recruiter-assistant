@@ -33,23 +33,28 @@ def genera():
     tema = dati.get("tema", "").strip()
     tono = dati.get("tono", "professionale")
     profilo = dati.get("profilo", "Salvatore Sabia")
+    obiettivo = dati.get("obiettivo", "attirare_candidati")
+    contesto = dati.get("contesto", "").strip()
 
     if not tema:
         return jsonify({"errore": "Inserire il tema del post"}), 400
 
     # Genera le 3 varianti con Claude
-    risultato = genera_contenuti_linkedin(tema, tono, profilo)
+    risultato = genera_contenuti_linkedin(tema, tono, profilo, obiettivo, contesto)
 
     # Salva nel database
     db = get_db()
     db.execute(
         """INSERT INTO contenuti_linkedin
-           (tema, tono, profilo_destinazione, variante_1, variante_2, variante_3)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+           (tema, tono, profilo_destinazione, obiettivo, contesto,
+            variante_1, variante_2, variante_3)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             tema,
             tono,
             profilo,
+            obiettivo,
+            contesto,
             risultato.get("variante_1", ""),
             risultato.get("variante_2", ""),
             risultato.get("variante_3", ""),
