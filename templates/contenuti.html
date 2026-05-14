@@ -131,24 +131,85 @@
 <div id="varianti-container" class="hidden">
     <div class="varianti-risultati-header">
         <h2>Le tue 3 varianti</h2>
-        <p>Scegli quella che preferisci, copiala o salvala</p>
+        <p>Modifica, arricchisci con AI o genera un'immagine per ogni post</p>
     </div>
     <div class="varianti-grid-new">
         {% for i in range(1, 4) %}
-        <div class="variante-card-new">
+        <div class="variante-card-new" id="card-variante-{{ i }}">
+            <!-- Header -->
             <div class="variante-card-top">
                 <span class="variante-num">Variante {{ i }}</span>
                 <span class="variante-badge" id="badge-{{ i }}"></span>
             </div>
+
+            <!-- Corpo: vista / editing -->
             <div class="variante-card-body">
                 <div id="variante-{{ i }}" class="post-preview"></div>
+                <textarea id="variante-edit-{{ i }}" class="variante-textarea hidden" rows="10"></textarea>
+                <div class="variante-edit-bar">
+                    <button class="btn btn-outline btn-xs" id="edit-btn-{{ i }}" onclick="attivaModifica({{ i }})">
+                        &#9999; Modifica
+                    </button>
+                    <div class="hidden" id="save-actions-{{ i }}" style="display:none;">
+                        <button class="btn btn-primary btn-xs" onclick="salvaModifica({{ i }})">
+                            &#10003; Salva modifiche
+                        </button>
+                        <button class="btn btn-outline btn-xs" onclick="annullaModifica({{ i }})">
+                            Annulla
+                        </button>
+                    </div>
+                </div>
             </div>
+
+            <!-- Modifica AI -->
+            <div class="variante-ai-mod">
+                <div class="variante-ai-row">
+                    <input type="text" class="form-input" id="mod-input-{{ i }}"
+                           placeholder="es. Rendilo pi&#249; breve, aggiungi un esempio concreto, cambia il finale...">
+                    <button class="btn btn-secondary btn-sm" id="mod-btn-{{ i }}" onclick="modificaConAI({{ i }})">
+                        <span id="mod-btn-text-{{ i }}">&#10227; Aggiorna variante</span>
+                        <span id="mod-btn-load-{{ i }}" class="hidden"><span class="spinner" style="border-top-color:var(--testo);border-color:rgba(26,46,74,0.2)"></span></span>
+                    </button>
+                </div>
+                <button class="btn btn-outline btn-xs hidden" id="undo-{{ i }}" onclick="versPrec({{ i }})">
+                    &#8617; Versione precedente
+                </button>
+            </div>
+
+            <!-- Genera immagine -->
+            <div class="variante-img-section">
+                <button class="btn btn-secondary btn-sm" id="imgbtn-{{ i }}" onclick="generaPromptImg({{ i }})">
+                    <span id="imgbtn-text-{{ i }}">&#128444; Genera immagine per questo post</span>
+                    <span id="imgbtn-load-{{ i }}" class="hidden"><span class="spinner" style="border-top-color:var(--testo);border-color:rgba(26,46,74,0.2)"></span></span>
+                </button>
+                <!-- Prompt box -->
+                <div id="img-prompt-area-{{ i }}" class="hidden variante-img-prompt-area">
+                    <label class="form-label" style="font-size:0.8rem;">Prompt immagine (puoi modificarlo)</label>
+                    <textarea id="img-prompt-{{ i }}" class="form-textarea" rows="2"></textarea>
+                    <button class="btn btn-primary btn-sm" id="img-gen-btn-{{ i }}" onclick="generaImmagine({{ i }})">
+                        <span id="img-gen-text-{{ i }}">&#10024; Genera immagine</span>
+                        <span id="img-gen-load-{{ i }}" class="hidden"><span class="spinner"></span> Generazione...</span>
+                    </button>
+                </div>
+                <!-- Immagine generata -->
+                <div id="img-display-{{ i }}" class="hidden variante-img-display">
+                    <img id="img-{{ i }}" src="" alt="Immagine generata">
+                    <a id="img-download-{{ i }}" class="btn btn-outline btn-xs" download="visual-variante-{{ i }}.jpg" target="_blank">
+                        &#8595; Scarica immagine
+                    </a>
+                </div>
+            </div>
+
+            <!-- Footer azioni -->
             <div class="variante-card-footer">
                 <button class="btn btn-outline btn-sm" onclick="copiaVariante({{ i }})">
-                    &#128203; Copia
+                    &#128203; Copia testo
                 </button>
-                <button class="btn btn-primary btn-sm" onclick="usaVariante({{ i }})">
-                    &#10003; Usa questo
+                <button class="btn btn-primary btn-sm" onclick="salvaBozza({{ i }})">
+                    &#128190; Salva bozza
+                </button>
+                <button class="btn btn-danger btn-sm" onclick="scartaVariante({{ i }})">
+                    &#128465; Scarta
                 </button>
             </div>
         </div>
@@ -185,11 +246,18 @@
 
 {% block scripts %}
 <script>
-// ── Placeholder dinamici per profilo ──
+// ── Stato ──
 var placeholders = {
-    'Salvatore Sabia': 'es. Come ho costruito il mio team, Perché ho scelto Fideuram...',
+    'Salvatore Sabia': 'es. Come ho costruito il mio team, Perch\u00e9 ho scelto Fideuram...',
     'Firdaous Filahi': 'es. Il primo colloquio che mi ha sorpreso, Come valuto un candidato...'
 };
+var toniLabel = {
+    'relazionale': '&#129309; Relazionale',
+    'professionale': '&#128188; Professionale',
+    'diretto': '&#128293; Diretto'
+};
+// Storico versioni per undo
+var storicoVersioni = {1: [], 2: [], 3: []};
 
 // ── Selezione profilo ──
 document.querySelectorAll('.profilo-card').forEach(function(card) {
@@ -201,7 +269,7 @@ document.querySelectorAll('.profilo-card').forEach(function(card) {
     });
 });
 
-// ── Selezione obiettivo (singola) ──
+// ── Selezione obiettivo ──
 document.querySelectorAll('.obiettivo-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
         document.querySelectorAll('.obiettivo-btn').forEach(function(b) { b.classList.remove('selected'); });
@@ -209,7 +277,7 @@ document.querySelectorAll('.obiettivo-btn').forEach(function(btn) {
     });
 });
 
-// ── Selezione tono (singola) ──
+// ── Selezione tono ──
 document.querySelectorAll('.tono-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
         document.querySelectorAll('.tono-btn').forEach(function(b) { b.classList.remove('selected'); });
@@ -217,14 +285,9 @@ document.querySelectorAll('.tono-btn').forEach(function(btn) {
     });
 });
 
-// ── Nomi tono per badge ──
-var toniLabel = {
-    'relazionale': '&#129309; Relazionale',
-    'professionale': '&#128188; Professionale',
-    'diretto': '&#128293; Diretto'
-};
-
-// ── Genera contenuti ──
+// ══════════════════════════════════════════
+// GENERA CONTENUTI
+// ══════════════════════════════════════════
 async function generaContenuti() {
     var tema = document.getElementById('tema').value.trim();
     var contesto = document.getElementById('contesto').value.trim();
@@ -250,23 +313,27 @@ async function generaContenuti() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ tema: tema, tono: tono, profilo: profilo, obiettivo: obiettivo, contesto: contesto })
         });
-
         var dati = await jsonSicuro(risposta);
         if (!risposta.ok) throw new Error(dati.errore || 'Errore nella generazione');
 
-        // Popola le 3 varianti
+        // Reset storico versioni
+        storicoVersioni = {1: [], 2: [], 3: []};
+
         for (var i = 1; i <= 3; i++) {
             var testo = dati['variante_' + i] || '';
-            var el = document.getElementById('variante-' + i);
-            el.innerHTML = testo.replace(/\n/g, '<br>');
-            el.dataset.testo = testo;
-            // Badge tono
+            aggiornaVariante(i, testo);
             document.getElementById('badge-' + i).innerHTML = toniLabel[tono] || tono;
+            // Reset sezioni
+            annullaModifica(i);
+            document.getElementById('mod-input-' + i).value = '';
+            document.getElementById('undo-' + i).classList.add('hidden');
+            document.getElementById('img-prompt-area-' + i).classList.add('hidden');
+            document.getElementById('img-display-' + i).classList.add('hidden');
+            document.getElementById('card-variante-' + i).style.display = '';
         }
 
         mostra('varianti-container');
         document.getElementById('varianti-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
-
     } catch (err) {
         document.getElementById('errore-contenuti').textContent = 'Errore: ' + err.message;
         mostra('errore-contenuti');
@@ -275,32 +342,10 @@ async function generaContenuti() {
     }
 }
 
-function copiaVariante(num) {
+function aggiornaVariante(num, testo) {
     var el = document.getElementById('variante-' + num);
-    var testo = el.dataset.testo || el.textContent;
-    navigator.clipboard.writeText(testo).then(function() {
-        var btn = event.target.closest('.btn');
-        var orig = btn.innerHTML;
-        btn.innerHTML = '&#10003; Copiato!';
-        btn.classList.remove('btn-outline');
-        btn.classList.add('btn-primary');
-        setTimeout(function() {
-            btn.innerHTML = orig;
-            btn.classList.remove('btn-primary');
-            btn.classList.add('btn-outline');
-        }, 2000);
-    });
-}
-
-function usaVariante(num) {
-    var el = document.getElementById('variante-' + num);
-    var testo = el.dataset.testo || el.textContent;
-    navigator.clipboard.writeText(testo).then(function() {
-        // Evidenzia la card selezionata
-        document.querySelectorAll('.variante-card-new').forEach(function(c) { c.classList.remove('variante-selected'); });
-        el.closest('.variante-card-new').classList.add('variante-selected');
-        mostraToast('Post copiato negli appunti');
-    });
+    el.innerHTML = testo.replace(/\n/g, '<br>');
+    el.dataset.testo = testo;
 }
 
 function impostaCaricamento(attivo) {
@@ -308,6 +353,225 @@ function impostaCaricamento(attivo) {
     btn.disabled = attivo;
     document.getElementById('btn-genera-testo').classList.toggle('hidden', attivo);
     document.getElementById('btn-genera-loading').classList.toggle('hidden', !attivo);
+}
+
+// ══════════════════════════════════════════
+// EDITING INLINE
+// ══════════════════════════════════════════
+function attivaModifica(num) {
+    var preview = document.getElementById('variante-' + num);
+    var textarea = document.getElementById('variante-edit-' + num);
+    textarea.value = preview.dataset.testo || preview.textContent;
+    preview.classList.add('hidden');
+    textarea.classList.remove('hidden');
+    textarea.focus();
+    document.getElementById('edit-btn-' + num).style.display = 'none';
+    var sa = document.getElementById('save-actions-' + num);
+    sa.classList.remove('hidden');
+    sa.style.display = '';
+}
+
+function salvaModifica(num) {
+    var textarea = document.getElementById('variante-edit-' + num);
+    var nuovoTesto = textarea.value.trim();
+    if (nuovoTesto) {
+        // Salva versione precedente nello storico
+        var vecchio = document.getElementById('variante-' + num).dataset.testo;
+        if (vecchio && vecchio !== nuovoTesto) {
+            storicoVersioni[num].push(vecchio);
+            document.getElementById('undo-' + num).classList.remove('hidden');
+        }
+        aggiornaVariante(num, nuovoTesto);
+    }
+    chiudiEditing(num);
+}
+
+function annullaModifica(num) {
+    chiudiEditing(num);
+}
+
+function chiudiEditing(num) {
+    document.getElementById('variante-' + num).classList.remove('hidden');
+    document.getElementById('variante-edit-' + num).classList.add('hidden');
+    document.getElementById('edit-btn-' + num).style.display = '';
+    var sa = document.getElementById('save-actions-' + num);
+    sa.classList.add('hidden');
+    sa.style.display = 'none';
+}
+
+// ══════════════════════════════════════════
+// MODIFICA CON AI
+// ══════════════════════════════════════════
+async function modificaConAI(num) {
+    var input = document.getElementById('mod-input-' + num);
+    var richiesta = input.value.trim();
+    if (!richiesta) { input.focus(); return; }
+
+    var testoAttuale = document.getElementById('variante-' + num).dataset.testo;
+    if (!testoAttuale) return;
+
+    var btn = document.getElementById('mod-btn-' + num);
+    btn.disabled = true;
+    document.getElementById('mod-btn-text-' + num).classList.add('hidden');
+    document.getElementById('mod-btn-load-' + num).classList.remove('hidden');
+
+    try {
+        var resp = await fetch('/contenuti/modifica_variante', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ testo_attuale: testoAttuale, richiesta_modifica: richiesta })
+        });
+        var dati = await jsonSicuro(resp);
+        if (!resp.ok) throw new Error(dati.errore || 'Errore');
+
+        // Salva versione precedente
+        storicoVersioni[num].push(testoAttuale);
+        document.getElementById('undo-' + num).classList.remove('hidden');
+
+        aggiornaVariante(num, dati.testo);
+        input.value = '';
+        mostraToast('Variante aggiornata con AI');
+    } catch (err) {
+        mostraToast('Errore: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        document.getElementById('mod-btn-text-' + num).classList.remove('hidden');
+        document.getElementById('mod-btn-load-' + num).classList.add('hidden');
+    }
+}
+
+function versPrec(num) {
+    if (!storicoVersioni[num].length) return;
+    var precedente = storicoVersioni[num].pop();
+    aggiornaVariante(num, precedente);
+    if (!storicoVersioni[num].length) {
+        document.getElementById('undo-' + num).classList.add('hidden');
+    }
+    mostraToast('Versione precedente ripristinata');
+}
+
+// ══════════════════════════════════════════
+// GENERA IMMAGINE
+// ══════════════════════════════════════════
+async function generaPromptImg(num) {
+    var testo = document.getElementById('variante-' + num).dataset.testo;
+    if (!testo) return;
+
+    var btn = document.getElementById('imgbtn-' + num);
+    btn.disabled = true;
+    document.getElementById('imgbtn-text-' + num).classList.add('hidden');
+    document.getElementById('imgbtn-load-' + num).classList.remove('hidden');
+
+    try {
+        var resp = await fetch('/contenuti/genera_prompt_immagine', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ testo_post: testo })
+        });
+        var dati = await jsonSicuro(resp);
+        if (!resp.ok) throw new Error(dati.errore || 'Errore');
+
+        document.getElementById('img-prompt-' + num).value = dati.prompt;
+        document.getElementById('img-prompt-area-' + num).classList.remove('hidden');
+    } catch (err) {
+        mostraToast('Errore: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        document.getElementById('imgbtn-text-' + num).classList.remove('hidden');
+        document.getElementById('imgbtn-load-' + num).classList.add('hidden');
+    }
+}
+
+async function generaImmagine(num) {
+    var prompt = document.getElementById('img-prompt-' + num).value.trim();
+    if (!prompt) return;
+
+    var btn = document.getElementById('img-gen-btn-' + num);
+    btn.disabled = true;
+    document.getElementById('img-gen-text-' + num).classList.add('hidden');
+    document.getElementById('img-gen-load-' + num).classList.remove('hidden');
+
+    // Attenuare immagine precedente se esiste
+    var imgEl = document.getElementById('img-' + num);
+    if (imgEl.src) imgEl.style.opacity = '0.3';
+
+    try {
+        var resp = await fetch('/contenuti/genera_immagine', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: prompt })
+        });
+        var dati = await jsonSicuro(resp);
+        if (!resp.ok) throw new Error(dati.errore || 'Errore');
+
+        imgEl.onload = function() { this.style.opacity = '1'; };
+        imgEl.src = dati.url;
+        document.getElementById('img-download-' + num).href = dati.url;
+        document.getElementById('img-display-' + num).classList.remove('hidden');
+    } catch (err) {
+        mostraToast('Errore immagine: ' + err.message);
+        imgEl.style.opacity = '1';
+    } finally {
+        btn.disabled = false;
+        document.getElementById('img-gen-text-' + num).classList.remove('hidden');
+        document.getElementById('img-gen-load-' + num).classList.add('hidden');
+    }
+}
+
+// ══════════════════════════════════════════
+// AZIONI FINALI
+// ══════════════════════════════════════════
+function copiaVariante(num) {
+    var el = document.getElementById('variante-' + num);
+    var testo = el.dataset.testo || el.textContent;
+    navigator.clipboard.writeText(testo).then(function() {
+        mostraToast('Testo copiato negli appunti');
+    });
+}
+
+async function salvaBozza(num) {
+    var el = document.getElementById('variante-' + num);
+    var testo = el.dataset.testo || el.textContent;
+    if (!testo) return;
+
+    var profilo = document.querySelector('input[name="profilo"]:checked').value;
+    var tema = document.getElementById('tema').value.trim();
+    var tonoEl = document.querySelector('.tono-btn.selected');
+    var tono = tonoEl ? tonoEl.dataset.val : '';
+    var obiettivoEl = document.querySelector('.obiettivo-btn.selected');
+    var obiettivo = obiettivoEl ? obiettivoEl.dataset.val : '';
+
+    // Recupera URL immagine se generata
+    var imgEl = document.getElementById('img-' + num);
+    var immagineUrl = (imgEl && imgEl.src && !imgEl.src.endsWith('/')) ? imgEl.src : '';
+
+    try {
+        var resp = await fetch('/contenuti/salva_bozza', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                testo: testo,
+                profilo: profilo,
+                tema: tema,
+                tono: tono,
+                obiettivo: obiettivo,
+                immagine_url: immagineUrl
+            })
+        });
+        var dati = await jsonSicuro(resp);
+        if (!resp.ok) throw new Error(dati.errore || 'Errore');
+        mostraToast('Bozza salvata');
+    } catch (err) {
+        mostraToast('Errore: ' + err.message);
+    }
+}
+
+function scartaVariante(num) {
+    var card = document.getElementById('card-variante-' + num);
+    card.style.transition = 'opacity 0.3s, transform 0.3s';
+    card.style.opacity = '0';
+    card.style.transform = 'scale(0.95)';
+    setTimeout(function() { card.style.display = 'none'; }, 300);
 }
 </script>
 {% endblock %}

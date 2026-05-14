@@ -1176,7 +1176,100 @@ body {
     line-height: 1.75;
     color: var(--testo);
     white-space: pre-wrap;
-    min-height: 140px;
+    min-height: 100px;
+}
+
+/* Editing inline */
+.variante-textarea {
+    width: 100%;
+    min-height: 160px;
+    padding: 0.75rem;
+    border: 1.5px solid var(--azzurro);
+    border-radius: 8px;
+    font-family: var(--font);
+    font-size: 0.88rem;
+    line-height: 1.75;
+    color: var(--testo);
+    resize: vertical;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(46,124,246,0.10);
+}
+
+.variante-edit-bar {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    align-items: center;
+}
+
+.variante-edit-bar > div {
+    display: flex;
+    gap: 0.4rem;
+}
+
+/* Modifica AI */
+.variante-ai-mod {
+    padding: 0.875rem 1.25rem;
+    border-top: 1px solid var(--grigio-bordo);
+    background: var(--grigio-bg);
+}
+
+.variante-ai-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.variante-ai-row .form-input {
+    flex: 1;
+    font-size: 0.85rem;
+    padding: 0.5rem 0.75rem;
+}
+
+.variante-ai-row .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.variante-ai-mod #undo-1,
+.variante-ai-mod #undo-2,
+.variante-ai-mod #undo-3,
+.variante-ai-mod [id^="undo-"] {
+    margin-top: 0.5rem;
+}
+
+/* Genera immagine */
+.variante-img-section {
+    padding: 0.875rem 1.25rem;
+    border-top: 1px solid var(--grigio-bordo);
+}
+
+.variante-img-prompt-area {
+    margin-top: 0.75rem;
+}
+
+.variante-img-prompt-area .form-textarea {
+    min-height: 60px;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+}
+
+.variante-img-display {
+    margin-top: 0.75rem;
+    text-align: center;
+}
+
+.variante-img-display img {
+    width: 100%;
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    display: block;
+    margin-bottom: 0.5rem;
+    transition: opacity 0.3s;
+}
+
+.variante-img-display .btn {
+    margin-top: 0.25rem;
 }
 
 /* Storico */
@@ -1767,6 +1860,10 @@ body {
     .obiettivo-grid { grid-template-columns: 1fr 1fr; }
     .tono-buttons { flex-direction: column; }
     .wizard-section { padding: 1.25rem; }
+    .variante-ai-row { flex-direction: column; }
+    .variante-ai-row .btn { width: 100%; }
+    .variante-card-footer { flex-wrap: wrap; }
+    .variante-card-footer .btn { flex: none; font-size: 0.78rem; }
     .slider-label { flex: 0 0 160px; font-size: 0.8rem; }
 
     /* Results grid */

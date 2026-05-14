@@ -8,7 +8,11 @@ import base64
 import requests
 from flask import Blueprint, render_template, request, jsonify
 from database import get_db
-from ai_helpers import genera_contenuti_linkedin, genera_prompt_immagine
+from ai_helpers import (
+    genera_contenuti_linkedin,
+    genera_prompt_immagine,
+    modifica_variante_linkedin,
+)
 
 # Blueprint per il modulo contenuti
 contenuti_bp = Blueprint("contenuti", __name__)
@@ -66,40 +70,50 @@ def genera():
     return jsonify(risultato)
 
 
-@contenuti_bp.route("/contenuti/genera_immagine", methods=["POST"])
-def genera_immagine():
-    """
-    Genera un'immagine per il post LinkedIn usando Pollinations.ai (gratuito, no API key).
-    Claude costruisce il prompt ottimizzato, Pollinations genera l'immagine con FLUX.
-    """
+@contenuti_bp.route("/contenuti/modifica_variante", methods=["POST"])
+def modifica_variante():
+    """Chiede a Claude di riscrivere una variante secondo le istruzioni."""
     dati = request.get_json()
-    testo_post    = dati.get("testo_post", "").strip()
-    tema          = dati.get("tema", "").strip()
-    tono          = dati.get("tono", "professionale")
-    profilo       = dati.get("profilo", "")
-    prompt_custom = dati.get("prompt_custom", "").strip()
+    testo_attuale = dati.get("testo_attuale", "").strip()
+    richiesta = dati.get("richiesta_modifica", "").strip()
+
+    if not testo_attuale or not richiesta:
+        return jsonify({"errore": "Testo e richiesta di modifica obbligatori"}), 400
+
+    testo_nuovo = modifica_variante_linkedin(testo_attuale, richiesta)
+    return jsonify({"testo": testo_nuovo})
+
+
+@contenuti_bp.route("/contenuti/genera_prompt_immagine", methods=["POST"])
+def genera_prompt():
+    """Claude genera un prompt ottimizzato per la generazione immagine."""
+    dati = request.get_json()
+    testo_post = dati.get("testo_post", "").strip()
 
     if not testo_post:
         return jsonify({"errore": "Testo post mancante"}), 400
 
-    # Claude genera il prompt ottimizzato per FLUX
-    prompt_img = genera_prompt_immagine(testo_post, tema, tono, prompt_custom)
+    prompt = genera_prompt_immagine(testo_post, "", "", "")
+    return jsonify({"prompt": prompt})
 
-    # Scarica l'immagine dal backend (richiesta anonima, bypassa il login browser)
+
+@contenuti_bp.route("/contenuti/genera_immagine", methods=["POST"])
+def genera_immagine():
+    """Genera un'immagine da un prompt usando Pollinations.ai."""
+    dati = request.get_json()
+    prompt_img = dati.get("prompt", "").strip()
+
+    if not prompt_img:
+        return jsonify({"errore": "Prompt mancante"}), 400
+
     prompt_encoded = urllib.parse.quote(prompt_img)
-    seed = abs(hash(prompt_img + prompt_custom)) % 99999
-    url_pollinations = (
-        f"https://image.pollinations.ai/prompt/{prompt_encoded}"
-        f"?width=1200&height=628&model=flux&nologo=true&seed={seed}"
-    )
-
+    seed = abs(hash(prompt_img)) % 99999
     url_pollinations = (
         f"https://image.pollinations.ai/prompt/{prompt_encoded}"
         f"?width=1200&height=628&model=turbo&seed={seed}"
     )
     headers = {"User-Agent": "Mozilla/5.0"}
 
-    # Fino a 3 tentativi con pausa in caso di rate limit (429)
     import time
     for tentativo in range(3):
         try:
@@ -108,16 +122,43 @@ def genera_immagine():
                 time.sleep(5)
                 continue
             resp_img.raise_for_status()
-            # Verifica che sia davvero un'immagine
             if resp_img.content[:4] in (b"<htm", b"<!do", b'{"er'):
-                return jsonify({"errore": "Il servizio immagini non è disponibile al momento. Riprova."}), 500
+                return jsonify({"errore": "Il servizio immagini non e disponibile al momento."}), 500
             img_b64 = base64.b64encode(resp_img.content).decode("utf-8")
             content_type = resp_img.headers.get("Content-Type", "image/jpeg")
             data_url = f"data:{content_type};base64,{img_b64}"
-            return jsonify({"url": data_url, "prompt": prompt_img})
+            return jsonify({"url": data_url})
         except requests.exceptions.RequestException as e:
             if tentativo == 2:
                 return jsonify({"errore": f"Errore: {str(e)}"}), 500
             time.sleep(3)
 
-    return jsonify({"errore": "Servizio temporaneamente non disponibile. Riprova tra qualche secondo."}), 500
+    return jsonify({"errore": "Servizio temporaneamente non disponibile."}), 500
+
+
+@contenuti_bp.route("/contenuti/salva_bozza", methods=["POST"])
+def salva_bozza():
+    """Salva una bozza di post nel database."""
+    dati = request.get_json()
+    testo = dati.get("testo", "").strip()
+    profilo = dati.get("profilo", "")
+    tema = dati.get("tema", "")
+    tono = dati.get("tono", "")
+    obiettivo = dati.get("obiettivo", "")
+    immagine_url = dati.get("immagine_url", "")
+
+    if not testo:
+        return jsonify({"errore": "Testo mancante"}), 400
+
+    db = get_db()
+    cur = db.execute(
+        """INSERT INTO bozze_contenuti
+           (profilo, testo, tono, obiettivo, tema, immagine_url)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (profilo, testo, tono, obiettivo, tema, immagine_url),
+    )
+    db.commit()
+    bozza_id = cur.lastrowid
+    db.close()
+
+    return jsonify({"successo": True, "id": bozza_id})

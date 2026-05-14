@@ -324,6 +324,18 @@ def init_db():
         "ALTER TABLE contenuti_linkedin ADD COLUMN IF NOT EXISTS obiettivo TEXT DEFAULT ''",
         "ALTER TABLE contenuti_linkedin ADD COLUMN IF NOT EXISTS contesto TEXT DEFAULT ''",
 
+        # Bozze contenuti LinkedIn salvate dall'utente
+        """CREATE TABLE IF NOT EXISTS bozze_contenuti (
+            id              SERIAL PRIMARY KEY,
+            profilo         TEXT NOT NULL,
+            testo           TEXT NOT NULL,
+            tono            TEXT,
+            obiettivo       TEXT,
+            tema            TEXT,
+            immagine_url    TEXT,
+            data_salvataggio TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+
         # Arricchimento Proxycurl
         "ALTER TABLE candidati   ADD COLUMN IF NOT EXISTS dati_proxycurl TEXT",
         "ALTER TABLE candidati   ADD COLUMN IF NOT EXISTS dati_arricchiti TEXT",

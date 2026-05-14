@@ -593,6 +593,29 @@ def genera_prompt_immagine(testo_post: str, tema: str, tono: str, prompt_custom:
     return risposta.content[0].text.strip()
 
 
+def modifica_variante_linkedin(testo_attuale: str, richiesta: str) -> str:
+    """Modifica una variante di post LinkedIn secondo le istruzioni dell'utente."""
+    testo_attuale = clean_text(testo_attuale)
+    richiesta = clean_text(richiesta)
+
+    prompt = (
+        "Sei un esperto di content marketing LinkedIn nel settore del recruiting bancario.\n"
+        "Riscrivi il seguente post LinkedIn applicando la modifica richiesta dall'utente.\n"
+        "Mantieni lo stesso stile, tono e struttura a meno che la modifica non richieda diversamente.\n\n"
+        f"POST ATTUALE:\n{testo_attuale}\n\n"
+        f"MODIFICA RICHIESTA: {richiesta}\n\n"
+        "Rispondi SOLO con il testo del post riscritto, senza spiegazioni o commenti."
+    )
+
+    payload = {
+        "model":      CLAUDE_MODEL,
+        "max_tokens": 1500,
+        "messages":   [{"role": "user", "content": clean_text(prompt)}],
+    }
+    risposta = _chiama_api("modifica_variante_linkedin", payload)
+    return risposta.content[0].text.strip()
+
+
 def genera_contenuti_linkedin(tema: str, tono: str, profilo: str,
                                obiettivo: str = "", contesto: str = "") -> dict:
     """Genera 3 varianti di post LinkedIn con tono di voce personalizzato per profilo."""
