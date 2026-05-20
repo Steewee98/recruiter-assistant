@@ -441,9 +441,8 @@ function apriStato(card) {
         const ruolo   = c.ruolo_attuale || "\u2014";
         const azienda = c.azienda || "";
         const profilo = c.tipo_profilo || "\u2014";
-        const puntRaw = c.punteggio;
-        const punt10  = puntRaw != null ? Math.round(puntRaw / 10) : null;
-        const scoreClass = punt10 != null ? (punt10 >= 8 ? 'score-alto' : (punt10 >= 5 ? 'score-medio' : 'score-basso')) : '';
+        const punt10  = c.punteggio;
+        const scoreClass = punt10 != null ? (punt10 >= 8 ? 'score-alto' : (punt10 >= 6 ? 'score-medio' : 'score-basso')) : '';
         const hasReport  = !!(c.analisi || (c.spunti && c.spunti !== '[]'));
         const puntHtml = punt10 != null
           ? "<span class='dash-punt " + scoreClass + "'><b>" + punt10 + "</b>/10</span>"
@@ -599,7 +598,7 @@ function apriReportDashboard(candidatoId) {
   }
 
   var datiReport = {
-    punteggio:         c.punteggio != null ? Math.round(c.punteggio / 10) : 0,
+    punteggio:         c.punteggio || 0,
     analisi_percorso:  c.analisi || '',
     spunti_contatto:   spunti || [],
     messaggio_outreach: c.messaggio_outreach || '',

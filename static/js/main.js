@@ -213,7 +213,7 @@ function _mostraReportNelModal(dati, candidatoInfo, salvaCallback) {
 
     var arricchito = !!dati.arricchito;
     var punteggio  = dati.punteggio || 0;
-    var scoreClass = punteggio >= 8 ? 'score-alto' : (punteggio >= 5 ? 'score-medio' : 'score-basso');
+    var scoreClass = punteggio >= 8 ? 'score-alto' : (punteggio >= 6 ? 'score-medio' : 'score-basso');
 
     var html = '';
 
