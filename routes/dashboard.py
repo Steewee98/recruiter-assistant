@@ -6,7 +6,7 @@ import json
 import io
 from datetime import datetime
 
-from flask import Blueprint, render_template, jsonify, Response
+from flask import Blueprint, render_template, jsonify, request, Response
 
 from database import get_db
 
@@ -124,7 +124,8 @@ def candidati_per_stato(stato):
     db = get_db()
     rows = db.execute(
         """SELECT id, nome, cognome, ruolo_attuale, azienda,
-                  tipo_profilo, punteggio, gestore, data_inserimento
+                  tipo_profilo, punteggio, gestore, stato,
+                  analisi, spunti, messaggio_outreach, data_inserimento
            FROM candidati
            WHERE stato = ?
            ORDER BY punteggio DESC NULLS LAST, data_inserimento DESC""",
@@ -137,6 +138,26 @@ def candidati_per_stato(stato):
         "totale": len(rows),
         "candidati": [dict(r) for r in rows],
     })
+
+
+@dashboard_bp.route("/dashboard/candidati/<int:candidato_id>/stato", methods=["PATCH"])
+def aggiorna_stato_dashboard(candidato_id):
+    """Aggiorna lo stato di un candidato dalla dashboard."""
+    dati = request.get_json()
+    nuovo_stato = dati.get("stato")
+
+    if nuovo_stato not in STATI:
+        return jsonify({"errore": "Stato non valido"}), 400
+
+    db = get_db()
+    db.execute(
+        "UPDATE candidati SET stato = ?, data_aggiornamento = CURRENT_TIMESTAMP WHERE id = ?",
+        (nuovo_stato, candidato_id),
+    )
+    db.commit()
+    db.close()
+
+    return jsonify({"successo": True, "stato": nuovo_stato})
 
 
 @dashboard_bp.route("/dashboard/report_pdf")

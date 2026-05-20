@@ -90,9 +90,9 @@
           <th>Ruolo / Azienda</th>
           <th>Profilo</th>
           <th>Punteggio</th>
+          <th>Stato</th>
           <th>Gestore</th>
           <th>Inserito</th>
-          <th></th>
         </tr>
       </thead>
       <tbody id="stato-tbody"></tbody>
@@ -373,6 +373,19 @@ setInterval(refresh, 60_000);
 // ════════════════════════════════════════════════════════
 // PANNELLO CANDIDATI PER STATO
 // ════════════════════════════════════════════════════════
+const TUTTI_STATI = {{ ['Da valutare','Da contattare','Richiesta Inviata','Messaggio Inviato','Risposto','In valutazione','Chiuso'] | tojson }};
+
+// Mappa CSS ID card → stato
+const CARD_IDS = {
+  "Da valutare":      "c-da-valutare",
+  "Da contattare":    "c-da-contattare",
+  "Richiesta Inviata":"c-richiesta",
+  "Messaggio Inviato":"c-messaggio",
+  "Risposto":         "c-risposto",
+  "In valutazione":   "c-in-valutazione",
+  "Chiuso":           "c-chiuso",
+};
+
 let _statoAttivo = null;
 
 function apriStato(card) {
@@ -428,24 +441,45 @@ function apriStato(card) {
         const ruolo   = c.ruolo_attuale || "\u2014";
         const azienda = c.azienda || "";
         const profilo = c.tipo_profilo || "\u2014";
-        const punt    = c.punteggio != null
-          ? "<b>" + c.punteggio + "</b>/100"
+        const puntRaw = c.punteggio;
+        const punt10  = puntRaw != null ? Math.round(puntRaw / 10) : null;
+        const scoreClass = punt10 != null ? (punt10 >= 8 ? 'score-alto' : (punt10 >= 5 ? 'score-medio' : 'score-basso')) : '';
+        const hasReport  = !!(c.analisi || (c.spunti && c.spunti !== '[]'));
+        const puntHtml = punt10 != null
+          ? "<span class='dash-punt " + scoreClass + "'><b>" + punt10 + "</b>/10</span>"
+            + (hasReport ? " <button class='btn btn-sm btn-report' onclick='apriReportDashboard(" + c.id + ")' title='Vedi Report AI'>Report</button>" : "")
           : "<span style='color:var(--grigio-testo)'>\u2014</span>";
         const gestore = c.gestore || "\u2014";
         const data_ins = (c.data_inserimento || "").slice(0, 10);
         const pBadge  = "<span class='badge badge-profilo" + profilo + "'>" + profilo + "</span>";
         const gShort  = gestore === "Salvatore Sabia" ? "Sabia"
                       : gestore === "Firdaous Filahi" ? "Firdaous" : gestore;
-        return "<tr>"
+
+        // Dropdown stato
+        var statoOpts = TUTTI_STATI.map(function(s) {
+          var sel = s === c.stato ? ' selected' : '';
+          return '<option value="' + escHtml(s) + '"' + sel + '>' + escHtml(s) + '</option>';
+        }).join('');
+        var statoHtml = "<select class='dash-stato-select' data-id='" + c.id + "' "
+          + "data-stato-originale='" + escHtml(c.stato) + "' "
+          + "onchange='cambiaStatoDashboard(this)' "
+          + "style='--select-color:" + (STATO_COLORS[c.stato] || '#6B7A99') + "'>"
+          + statoOpts + "</select>";
+
+        return "<tr data-candidato-id='" + c.id + "'>"
           + "<td><div class='candidato-nome'>" + nome + "</div></td>"
           + "<td><div>" + ruolo + "</div><div class='candidato-meta'>" + azienda + "</div></td>"
           + "<td>" + pBadge + "</td>"
-          + "<td>" + punt + "</td>"
+          + "<td>" + puntHtml + "</td>"
+          + "<td>" + statoHtml + "</td>"
           + "<td>" + gShort + "</td>"
           + "<td class='candidato-meta'>" + data_ins + "</td>"
-          + "<td><a href='/pipeline' class='btn btn-sm btn-outline'>Pipeline &rarr;</a></td>"
           + "</tr>";
       }).join("");
+
+      // Salva dati candidati per il report modal
+      _candidatiCache = {};
+      data.candidati.forEach(function(c) { _candidatiCache[c.id] = c; });
 
       document.getElementById("stato-table").classList.remove("hidden");
     })
@@ -461,6 +495,120 @@ function chiudiPanel() {
   document.querySelectorAll(".dash-card--clickable").forEach(function(c) {
     c.classList.remove("dash-card--active");
   });
+}
+
+// ════════════════════════════════════════════════════════
+// CAMBIO STATO INLINE
+// ════════════════════════════════════════════════════════
+function cambiaStatoDashboard(sel) {
+  var id = sel.dataset.id;
+  var vecchioStato = sel.dataset.statoOriginale;
+  var nuovoStato   = sel.value;
+
+  if (nuovoStato === vecchioStato) return;
+
+  sel.disabled = true;
+
+  fetch("/dashboard/candidati/" + id + "/stato", {
+    method: "PATCH",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({stato: nuovoStato})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.successo) {
+      // Aggiorna colore select
+      sel.style.setProperty('--select-color', STATO_COLORS[nuovoStato] || '#6B7A99');
+      sel.dataset.statoOriginale = nuovoStato;
+
+      // Aggiorna contatori card in tempo reale
+      _aggiornaContatoreCard(vecchioStato, -1);
+      _aggiornaContatoreCard(nuovoStato, +1);
+
+      // Aggiorna totale (resta uguale)
+      // Se la riga non appartiene piu' allo stato del pannello, rimuovila con animazione
+      if (nuovoStato !== _statoAttivo) {
+        var tr = sel.closest('tr');
+        if (tr) {
+          tr.style.transition = 'opacity 0.3s, transform 0.3s';
+          tr.style.opacity = '0';
+          tr.style.transform = 'translateX(20px)';
+          setTimeout(function() {
+            tr.remove();
+            // Aggiorna conteggio header pannello
+            var righeRimaste = document.querySelectorAll('#stato-tbody tr').length;
+            document.getElementById('stato-label').textContent =
+              righeRimaste + ' candidat' + (righeRimaste === 1 ? 'o' : 'i') + ' in stato \u201c' + _statoAttivo + '\u201d';
+            if (righeRimaste === 0) {
+              document.getElementById('stato-table').classList.add('hidden');
+              document.getElementById('stato-empty').classList.remove('hidden');
+            }
+          }, 300);
+        }
+      }
+
+      mostraToast('Stato aggiornato: ' + nuovoStato);
+    } else {
+      sel.value = vecchioStato;
+      mostraToast('Errore aggiornamento stato');
+    }
+    sel.disabled = false;
+  })
+  .catch(function() {
+    sel.value = vecchioStato;
+    sel.disabled = false;
+    mostraToast('Errore di connessione');
+  });
+}
+
+function _aggiornaContatoreCard(stato, delta) {
+  var cssId = CARD_IDS[stato];
+  if (!cssId) return;
+  var el = document.getElementById(cssId);
+  if (!el) return;
+  var val = parseInt(el.textContent, 10) || 0;
+  el.textContent = Math.max(0, val + delta);
+
+  // Aggiorna anche la percentuale e la barra
+  var totEl = document.getElementById('c-totale');
+  var totale = parseInt(totEl.textContent, 10) || 1;
+  var card = el.closest('.dash-card');
+  if (card) {
+    var sub  = card.querySelector('.dash-card__sub');
+    var fill = card.querySelector('.dash-card__bar-fill');
+    var newVal = Math.max(0, val + delta);
+    var pct = totale > 0 ? (newVal / totale * 100).toFixed(1) : 0;
+    if (sub)  sub.textContent = pct + '% del totale';
+    if (fill) fill.style.width = pct + '%';
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// REPORT AI INLINE
+// ════════════════════════════════════════════════════════
+var _candidatiCache = {};
+
+function apriReportDashboard(candidatoId) {
+  var c = _candidatiCache[candidatoId];
+  if (!c) return;
+
+  // Costruisci dati nel formato atteso da _mostraReportNelModal
+  var spunti = c.spunti;
+  if (typeof spunti === 'string') {
+    try { spunti = JSON.parse(spunti); } catch(e) { spunti = []; }
+  }
+
+  var datiReport = {
+    punteggio:         c.punteggio != null ? Math.round(c.punteggio / 10) : 0,
+    analisi_percorso:  c.analisi || '',
+    spunti_contatto:   spunti || [],
+    messaggio_outreach: c.messaggio_outreach || '',
+  };
+
+  var titolo = [c.nome, c.cognome].filter(Boolean).join(' ') || 'Candidato';
+  document.getElementById('modal-report-titolo').textContent = 'Report AI — ' + titolo;
+
+  _mostraReportNelModal(datiReport, null, null);
 }
 </script>
 
@@ -649,6 +797,58 @@ function chiudiPanel() {
 .stato-table { margin: 0; }
 .stato-empty { padding: 1.5rem; text-align: center; color: var(--grigio-testo); }
 .hidden { display: none !important; }
+
+/* ── Dropdown stato inline ────────────────────────────── */
+.dash-stato-select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1.5px solid var(--select-color, #6B7A99);
+  background: color-mix(in srgb, var(--select-color, #6B7A99) 8%, white);
+  color: var(--select-color, #6B7A99);
+  font-weight: 600;
+  font-size: .78rem;
+  padding: .3rem .55rem;
+  padding-right: 1.4rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236B7A99'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right .45rem center;
+  max-width: 150px;
+}
+.dash-stato-select:hover {
+  border-color: color-mix(in srgb, var(--select-color, #6B7A99) 80%, black);
+}
+.dash-stato-select:disabled {
+  opacity: .5; cursor: wait;
+}
+
+/* ── Punteggio + report ───────────────────────────────── */
+.dash-punt {
+  font-size: .88rem;
+}
+.dash-punt.score-alto  { color: #16a34a; }
+.dash-punt.score-medio { color: #d97706; }
+.dash-punt.score-basso { color: #dc2626; }
+
+.btn-report {
+  font-size: .72rem !important;
+  padding: .2rem .5rem !important;
+  background: var(--azzurro-light, #dbeafe);
+  color: var(--azzurro, #2E7CF6);
+  border: 1px solid var(--azzurro, #2E7CF6);
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  margin-left: .4rem;
+  transition: background .15s, color .15s;
+  vertical-align: middle;
+}
+.btn-report:hover {
+  background: var(--azzurro, #2E7CF6);
+  color: #fff;
+}
 </style>
 
 {% endblock %}
