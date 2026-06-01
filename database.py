@@ -320,6 +320,9 @@ def init_db():
         # Gestore candidato
         "ALTER TABLE candidati ADD COLUMN IF NOT EXISTS gestore TEXT DEFAULT 'Non assegnato'",
 
+        # Migrazione stati: Risposto e In valutazione → Contattati (stati rimossi)
+        "UPDATE candidati SET stato = 'Contattati' WHERE stato IN ('Risposto', 'In valutazione')",
+
         # Contenuti LinkedIn: nuovi campi wizard
         "ALTER TABLE contenuti_linkedin ADD COLUMN IF NOT EXISTS obiettivo TEXT DEFAULT ''",
         "ALTER TABLE contenuti_linkedin ADD COLUMN IF NOT EXISTS contesto TEXT DEFAULT ''",

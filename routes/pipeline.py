@@ -13,7 +13,7 @@ from ai_helpers import genera_messaggio_followup, rigenera_messaggio_followup
 pipeline_bp = Blueprint("pipeline", __name__)
 
 # Stati disponibili nel processo di selezione
-STATI_VALIDI = ["Da valutare", "Da contattare", "Richiesta Inviata", "Messaggio Inviato", "Risposto", "In valutazione", "Chiuso"]
+STATI_VALIDI = ["Da valutare", "Da contattare", "Richiesta Inviata", "Messaggio Inviato", "Chiuso"]
 
 # Gestori disponibili
 GESTORI_VALIDI = ["Salvatore Sabia", "Firdaous Filahi", "Non assegnato"]

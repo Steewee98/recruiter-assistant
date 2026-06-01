@@ -32,13 +32,10 @@
   </div>
 
   {% set stati_cfg = [
-    ("Da valutare",      "#6B7A99", "c-da-valutare"),
-    ("Da contattare",    "#2E7CF6", "c-da-contattare"),
-    ("Richiesta Inviata","#F59E0B", "c-richiesta"),
-    ("Messaggio Inviato","#D97706", "c-messaggio"),
-    ("Risposto",         "#22C55E", "c-risposto"),
-    ("In valutazione",   "#8B5CF6", "c-in-valutazione"),
-    ("Chiuso",           "#EF4444", "c-chiuso"),
+    ("Da valutare",  "#2E7CF6", "c-da-valutare"),
+    ("Da contattare","#F59E0B", "c-da-contattare"),
+    ("Contattati",   "#059669", "c-contattati"),
+    ("Chiuso",       "#DC2626", "c-chiuso"),
   ] %}
 
   {% for stato, colore, css_id in stati_cfg %}
@@ -257,21 +254,22 @@ let _stats = {{ stats | tojson }};
 
 // ── Palette colori ────────────────────────────────────────────────────────────
 const STATO_COLORS = {
-  "Da valutare":      "#6B7A99",
-  "Da contattare":    "#2E7CF6",
-  "Richiesta Inviata":"#F59E0B",
-  "Messaggio Inviato":"#D97706",
-  "Risposto":         "#22C55E",
-  "In valutazione":   "#8B5CF6",
-  "Chiuso":           "#EF4444",
+  "Da valutare":      "#2E7CF6",
+  "Da contattare":    "#F59E0B",
+  "Richiesta Inviata":"#34D399",
+  "Messaggio Inviato":"#059669",
+  "Contattati":       "#059669",
+  "Chiuso":           "#DC2626",
 };
 
 // ── Inizializza grafici ───────────────────────────────────────────────────────
 let chartStati, chartProfilo, chartGestore;
 
 function buildCharts(stats) {
-  const stati   = Object.keys(stats.per_stato);
-  const cntStati = stati.map(s => stats.per_stato[s]);
+  // Grafico a ciambella: 5 voci (Da valutare, Da contattare, Richiesta Inviata, Messaggio Inviato, Chiuso)
+  const CHART_STATI = ["Da valutare", "Da contattare", "Richiesta Inviata", "Messaggio Inviato", "Chiuso"];
+  const stati   = CHART_STATI;
+  const cntStati = stati.map(s => stats.per_stato[s] || 0);
   const colStati  = stati.map(s => STATO_COLORS[s] || "#6B7A99");
 
   const opts = {
@@ -333,14 +331,11 @@ function buildCharts(stats) {
 // ── Aggiorna cards ─────────────────────────────────────────────────────────────
 function updateCards(stats) {
   const IDS = {
-    "totale":           "c-totale",
-    "Da valutare":      "c-da-valutare",
-    "Da contattare":    "c-da-contattare",
-    "Richiesta Inviata":"c-richiesta",
-    "Messaggio Inviato":"c-messaggio",
-    "Risposto":         "c-risposto",
-    "In valutazione":   "c-in-valutazione",
-    "Chiuso":           "c-chiuso",
+    "totale":       "c-totale",
+    "Da valutare":  "c-da-valutare",
+    "Da contattare":"c-da-contattare",
+    "Contattati":   "c-contattati",
+    "Chiuso":       "c-chiuso",
   };
   const el = id => document.getElementById(id);
   el("c-totale").textContent = stats.totale;
@@ -373,16 +368,24 @@ setInterval(refresh, 60_000);
 // ════════════════════════════════════════════════════════
 // PANNELLO CANDIDATI PER STATO
 // ════════════════════════════════════════════════════════
-const TUTTI_STATI = {{ ['Da valutare','Da contattare','Richiesta Inviata','Messaggio Inviato','Risposto','In valutazione','Chiuso'] | tojson }};
+const TUTTI_STATI = {{ ['Da valutare','Da contattare','Richiesta Inviata','Messaggio Inviato','Chiuso'] | tojson }};
+
+// Opzioni dropdown stato con label raggruppate
+const STATI_DROPDOWN = [
+  {value: "Da valutare",       label: "Da valutare"},
+  {value: "Da contattare",     label: "Da contattare"},
+  {value: "Richiesta Inviata", label: "Contattati \u2014 Richiesta Inviata"},
+  {value: "Messaggio Inviato", label: "Contattati \u2014 Messaggio Inviato"},
+  {value: "Chiuso",            label: "Chiuso"},
+];
 
 // Mappa CSS ID card → stato
 const CARD_IDS = {
   "Da valutare":      "c-da-valutare",
   "Da contattare":    "c-da-contattare",
-  "Richiesta Inviata":"c-richiesta",
-  "Messaggio Inviato":"c-messaggio",
-  "Risposto":         "c-risposto",
-  "In valutazione":   "c-in-valutazione",
+  "Contattati":       "c-contattati",
+  "Richiesta Inviata":"c-contattati",
+  "Messaggio Inviato":"c-contattati",
   "Chiuso":           "c-chiuso",
 };
 
@@ -430,51 +433,45 @@ function apriStato(card) {
 
       document.getElementById("stato-skeleton").classList.add("hidden");
 
+      // Contattati: risposta con sottocategorie
+      if (stato === "Contattati" && data.sottocategorie) {
+        var allCandidati = [];
+        var html = "";
+        var subs = [
+          {key: "Richiesta Inviata", icon: "\uD83D\uDCE8", color: "#34D399"},
+          {key: "Messaggio Inviato", icon: "\uD83D\uDCAC", color: "#059669"},
+        ];
+        subs.forEach(function(sub) {
+          var lista = data.sottocategorie[sub.key] || [];
+          allCandidati = allCandidati.concat(lista);
+          html += "<tr class='stato-sub-header'><td colspan='7' style='background:color-mix(in srgb, " + sub.color + " 10%, white);padding:.6rem 1rem;font-weight:700;font-size:.88rem;color:" + sub.color + "'>"
+            + sub.icon + " " + sub.key + " (" + lista.length + ")</td></tr>";
+          if (lista.length === 0) {
+            html += "<tr><td colspan='7' style='padding:.8rem 1rem;color:var(--grigio-testo);font-size:.85rem;'>Nessun candidato</td></tr>";
+          } else {
+            html += lista.map(function(c) { return _rigaCandidato(c); }).join("");
+          }
+        });
+
+        _candidatiCache = {};
+        allCandidati.forEach(function(c) { _candidatiCache[c.id] = c; });
+
+        if (tot === 0) {
+          document.getElementById("stato-empty").classList.remove("hidden");
+        } else {
+          document.getElementById("stato-tbody").innerHTML = html;
+          document.getElementById("stato-table").classList.remove("hidden");
+        }
+        return;
+      }
+
       if (!data.candidati || data.candidati.length === 0) {
         document.getElementById("stato-empty").classList.remove("hidden");
         return;
       }
 
       const tbody = document.getElementById("stato-tbody");
-      tbody.innerHTML = data.candidati.map(function(c) {
-        const nome    = [c.nome, c.cognome].filter(Boolean).join(" ") || "\u2014";
-        const ruolo   = c.ruolo_attuale || "\u2014";
-        const azienda = c.azienda || "";
-        const profilo = c.tipo_profilo || "\u2014";
-        const punt10  = c.punteggio;
-        const scoreClass = punt10 != null ? (punt10 >= 8 ? 'score-alto' : (punt10 >= 6 ? 'score-medio' : 'score-basso')) : '';
-        const hasReport  = !!(c.analisi || (c.spunti && c.spunti !== '[]'));
-        const puntHtml = punt10 != null
-          ? "<span class='dash-punt " + scoreClass + "'><b>" + punt10 + "</b>/10</span>"
-            + (hasReport ? " <button class='btn btn-sm btn-report' onclick='apriReportDashboard(" + c.id + ")' title='Vedi Report AI'>Report</button>" : "")
-          : "<span style='color:var(--grigio-testo)'>\u2014</span>";
-        const gestore = c.gestore || "\u2014";
-        const data_ins = (c.data_inserimento || "").slice(0, 10);
-        const pBadge  = "<span class='badge badge-profilo" + profilo + "'>" + profilo + "</span>";
-        const gShort  = gestore === "Salvatore Sabia" ? "Sabia"
-                      : gestore === "Firdaous Filahi" ? "Firdaous" : gestore;
-
-        // Dropdown stato
-        var statoOpts = TUTTI_STATI.map(function(s) {
-          var sel = s === c.stato ? ' selected' : '';
-          return '<option value="' + escHtml(s) + '"' + sel + '>' + escHtml(s) + '</option>';
-        }).join('');
-        var statoHtml = "<select class='dash-stato-select' data-id='" + c.id + "' "
-          + "data-stato-originale='" + escHtml(c.stato) + "' "
-          + "onchange='cambiaStatoDashboard(this)' "
-          + "style='--select-color:" + (STATO_COLORS[c.stato] || '#6B7A99') + "'>"
-          + statoOpts + "</select>";
-
-        return "<tr data-candidato-id='" + c.id + "'>"
-          + "<td><div class='candidato-nome'>" + nome + "</div></td>"
-          + "<td><div>" + ruolo + "</div><div class='candidato-meta'>" + azienda + "</div></td>"
-          + "<td>" + pBadge + "</td>"
-          + "<td>" + puntHtml + "</td>"
-          + "<td>" + statoHtml + "</td>"
-          + "<td>" + gShort + "</td>"
-          + "<td class='candidato-meta'>" + data_ins + "</td>"
-          + "</tr>";
-      }).join("");
+      tbody.innerHTML = data.candidati.map(function(c) { return _rigaCandidato(c); }).join("");
 
       // Salva dati candidati per il report modal
       _candidatiCache = {};
@@ -486,6 +483,47 @@ function apriStato(card) {
       document.getElementById("stato-skeleton").classList.add("hidden");
       document.getElementById("stato-label").textContent = "Errore caricamento \u201c" + stato + "\u201d";
     });
+}
+
+// Riga candidato riutilizzabile
+function _rigaCandidato(c) {
+  const nome    = [c.nome, c.cognome].filter(Boolean).join(" ") || "\u2014";
+  const ruolo   = c.ruolo_attuale || "\u2014";
+  const azienda = c.azienda || "";
+  const profilo = c.tipo_profilo || "\u2014";
+  const punt10  = c.punteggio;
+  const scoreClass = punt10 != null ? (punt10 >= 8 ? 'score-alto' : (punt10 >= 6 ? 'score-medio' : 'score-basso')) : '';
+  const hasReport  = !!(c.analisi || (c.spunti && c.spunti !== '[]'));
+  const puntHtml = punt10 != null
+    ? "<span class='dash-punt " + scoreClass + "'><b>" + punt10 + "</b>/10</span>"
+      + (hasReport ? " <button class='btn btn-sm btn-report' onclick='apriReportDashboard(" + c.id + ")' title='Vedi Report AI'>Report</button>" : "")
+    : "<span style='color:var(--grigio-testo)'>\u2014</span>";
+  const gestore = c.gestore || "\u2014";
+  const data_ins = (c.data_inserimento || "").slice(0, 10);
+  const pBadge  = "<span class='badge badge-profilo" + profilo + "'>" + profilo + "</span>";
+  const gShort  = gestore === "Salvatore Sabia" ? "Sabia"
+                : gestore === "Firdaous Filahi" ? "Firdaous" : gestore;
+
+  // Dropdown stato con label raggruppate
+  var statoOpts = STATI_DROPDOWN.map(function(s) {
+    var sel = s.value === c.stato ? ' selected' : '';
+    return '<option value="' + escHtml(s.value) + '"' + sel + '>' + escHtml(s.label) + '</option>';
+  }).join('');
+  var statoHtml = "<select class='dash-stato-select' data-id='" + c.id + "' "
+    + "data-stato-originale='" + escHtml(c.stato) + "' "
+    + "onchange='cambiaStatoDashboard(this)' "
+    + "style='--select-color:" + (STATO_COLORS[c.stato] || '#6B7A99') + "'>"
+    + statoOpts + "</select>";
+
+  return "<tr data-candidato-id='" + c.id + "'>"
+    + "<td><div class='candidato-nome'>" + nome + "</div></td>"
+    + "<td><div>" + ruolo + "</div><div class='candidato-meta'>" + azienda + "</div></td>"
+    + "<td>" + pBadge + "</td>"
+    + "<td>" + puntHtml + "</td>"
+    + "<td>" + statoHtml + "</td>"
+    + "<td>" + gShort + "</td>"
+    + "<td class='candidato-meta'>" + data_ins + "</td>"
+    + "</tr>";
 }
 
 function chiudiPanel() {
@@ -526,7 +564,9 @@ function cambiaStatoDashboard(sel) {
 
       // Aggiorna totale (resta uguale)
       // Se la riga non appartiene piu' allo stato del pannello, rimuovila con animazione
-      if (nuovoStato !== _statoAttivo) {
+      var appartienePannello = (nuovoStato === _statoAttivo)
+        || (_statoAttivo === "Contattati" && (nuovoStato === "Richiesta Inviata" || nuovoStato === "Messaggio Inviato"));
+      if (!appartienePannello) {
         var tr = sel.closest('tr');
         if (tr) {
           tr.style.transition = 'opacity 0.3s, transform 0.3s';
@@ -535,7 +575,7 @@ function cambiaStatoDashboard(sel) {
           setTimeout(function() {
             tr.remove();
             // Aggiorna conteggio header pannello
-            var righeRimaste = document.querySelectorAll('#stato-tbody tr').length;
+            var righeRimaste = document.querySelectorAll('#stato-tbody tr:not(.stato-sub-header)').length;
             document.getElementById('stato-label').textContent =
               righeRimaste + ' candidat' + (righeRimaste === 1 ? 'o' : 'i') + ' in stato \u201c' + _statoAttivo + '\u201d';
             if (righeRimaste === 0) {

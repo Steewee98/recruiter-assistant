@@ -103,9 +103,11 @@
                         <select class="stato-select" data-id="{{ c.id }}"
                                 data-stato="{{ c.stato or '' }}"
                                 onchange="aggiornaStato(this)">
-                            {% for stato in stati %}
-                            <option value="{{ stato }}" {% if c.stato == stato %}selected{% endif %}>{{ stato }}</option>
-                            {% endfor %}
+                            <option value="Da valutare" {% if c.stato == 'Da valutare' %}selected{% endif %}>Da valutare</option>
+                            <option value="Da contattare" {% if c.stato == 'Da contattare' %}selected{% endif %}>Da contattare</option>
+                            <option value="Richiesta Inviata" {% if c.stato == 'Richiesta Inviata' %}selected{% endif %}>Contattati &mdash; Richiesta Inviata</option>
+                            <option value="Messaggio Inviato" {% if c.stato == 'Messaggio Inviato' %}selected{% endif %}>Contattati &mdash; Messaggio Inviato</option>
+                            <option value="Chiuso" {% if c.stato == 'Chiuso' %}selected{% endif %}>Chiuso</option>
                         </select>
                     </td>
                     <td>

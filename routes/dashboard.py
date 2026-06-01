@@ -17,10 +17,11 @@ STATI = [
     "Da contattare",
     "Richiesta Inviata",
     "Messaggio Inviato",
-    "Risposto",
-    "In valutazione",
     "Chiuso",
 ]
+
+# Sottocategorie raggruppate sotto "Contattati" nella dashboard
+STATI_CONTATTATI = ["Richiesta Inviata", "Messaggio Inviato", "Contattati"]
 
 GESTORI = ["Salvatore Sabia", "Firdaous Filahi", "Non assegnato"]
 
@@ -35,9 +36,12 @@ def _get_stats():
     totale = db.execute("SELECT COUNT(*) AS n FROM candidati").fetchone()["n"] or 0
 
     per_stato = {}
-    for s in STATI:
+    for s in STATI + ["Contattati"]:
         row = db.execute("SELECT COUNT(*) AS n FROM candidati WHERE stato=?", (s,)).fetchone()
         per_stato[s] = row["n"] if row else 0
+
+    # Conteggio aggregato "Contattati" (somma delle sottocategorie + valore legacy)
+    per_stato["Contattati"] = sum(per_stato.get(s, 0) for s in STATI_CONTATTATI)
 
     per_profilo = {}
     for p in ["A", "B"]:
@@ -118,6 +122,41 @@ def stats():
 @dashboard_bp.route("/dashboard/candidati/<path:stato>")
 def candidati_per_stato(stato):
     """Restituisce in JSON i candidati di uno stato, ordinati per punteggio desc."""
+    # "Contattati" e' un raggruppamento visivo di Richiesta Inviata + Messaggio Inviato
+    if stato == "Contattati":
+        db = get_db()
+        risultato = {"stato": "Contattati", "sottocategorie": {}}
+        totale = 0
+        # Solo le due sottocategorie visibili all'utente
+        for sub in ["Richiesta Inviata", "Messaggio Inviato"]:
+            # Includi anche i record legacy con stato='Contattati' nella prima sottocategoria
+            if sub == "Richiesta Inviata":
+                rows = db.execute(
+                    """SELECT id, nome, cognome, ruolo_attuale, azienda,
+                              tipo_profilo, punteggio, gestore, stato,
+                              analisi, spunti, messaggio_outreach, data_inserimento
+                       FROM candidati
+                       WHERE stato IN (?, 'Contattati')
+                       ORDER BY punteggio DESC NULLS LAST, data_inserimento DESC""",
+                    (sub,),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    """SELECT id, nome, cognome, ruolo_attuale, azienda,
+                              tipo_profilo, punteggio, gestore, stato,
+                              analisi, spunti, messaggio_outreach, data_inserimento
+                       FROM candidati
+                       WHERE stato = ?
+                       ORDER BY punteggio DESC NULLS LAST, data_inserimento DESC""",
+                    (sub,),
+                ).fetchall()
+            candidati_sub = [dict(r) for r in rows]
+            risultato["sottocategorie"][sub] = candidati_sub
+            totale += len(candidati_sub)
+        db.close()
+        risultato["totale"] = totale
+        return jsonify(risultato)
+
     if stato not in STATI:
         return jsonify({"errore": "Stato non valido"}), 400
 
@@ -195,6 +234,7 @@ def report_pdf():
 
     totale = len(tutti_candidati)
     per_stato = {s: sum(1 for c in tutti_candidati if c["stato"] == s) for s in STATI}
+    per_stato["Contattati"] = sum(per_stato.get(s, 0) for s in STATI_CONTATTATI)
     per_profilo = {p: sum(1 for c in tutti_candidati if c["tipo_profilo"] == p) for p in ["A", "B"]}
     per_gestore = {g: sum(1 for c in tutti_candidati if c["gestore"] == g) for g in GESTORI}
     valutati = [c for c in tutti_candidati if c["punteggio"]]

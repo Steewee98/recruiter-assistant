@@ -691,8 +691,6 @@ body {
 .stato-select[data-stato="Da contattare"]     { border-color: #2563EB; color: #1D4ED8; }
 .stato-select[data-stato="Richiesta Inviata"] { border-color: #D97706; color: #92400E; }
 .stato-select[data-stato="Messaggio Inviato"] { border-color: #F59E0B; color: #B45309; }
-.stato-select[data-stato="Risposto"]          { border-color: #16A34A; color: #15803D; }
-.stato-select[data-stato="In valutazione"]    { border-color: #7C3AED; color: #6D28D9; }
 .stato-select[data-stato="Chiuso"]            { border-color: #DC2626; color: #B91C1C; }
 
 /* Badge stato (usato in ricerca_dettaglio e altrove) */
