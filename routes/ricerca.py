@@ -1020,7 +1020,12 @@ def cerca():
     )
     ricerca_id = cur.lastrowid
 
+    profili_salvati = 0
     for p in tutti_profili:
+        # Non salvare (e quindi non riproporre nel dettaglio) i profili già in
+        # pipeline o scartati: il dettaglio ricerca deve mostrare solo profili NUOVI.
+        if p.get("gia_in_pipeline"):
+            continue
         testo = _costruisci_testo_profilo(p)
         cur_p = db.execute(
             """INSERT INTO profili_ricerca
@@ -1030,6 +1035,7 @@ def cerca():
              p["location"], p["linkedin"], testo)
         )
         p["profilo_ricerca_id"] = cur_p.lastrowid
+        profili_salvati += 1
 
     db.commit()
     db.close()
@@ -1692,6 +1698,15 @@ def dettaglio_ricerca(ricerca_id):
                     OR (COALESCE(pr.linkedin_url,'') = ''
                         AND LOWER(TRIM(ps.nome))    = LOWER(TRIM(pr.nome))
                         AND LOWER(TRIM(ps.cognome)) = LOWER(TRIM(pr.cognome)))
+             )
+             AND NOT EXISTS (
+                 -- Nascondi profili già presenti come candidato in un'ALTRA ricerca
+                 -- (un candidato di QUESTA ricerca è il profilo stesso, va mostrato).
+                 SELECT 1 FROM candidati cx
+                 WHERE cx.ricerca_id IS DISTINCT FROM pr.ricerca_id
+                   AND ((COALESCE(pr.linkedin_url,'') <> '' AND cx.profilo_linkedin = pr.linkedin_url)
+                     OR (LOWER(TRIM(cx.nome))    = LOWER(TRIM(pr.nome))
+                         AND LOWER(TRIM(cx.cognome)) = LOWER(TRIM(pr.cognome))))
              )
            ORDER BY c.punteggio DESC NULLS LAST, pr.id""",
         (ricerca_id,)
