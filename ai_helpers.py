@@ -20,6 +20,29 @@ def get_client():
     return anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 
+def messaggio_errore_ai(e: Exception) -> str:
+    """
+    Traduce un'eccezione dell'SDK Anthropic in un messaggio chiaro in italiano.
+    Va usato ovunque l'errore venga mostrato all'utente, al posto del JSON grezzo.
+    """
+    testo = str(e).lower()
+    # Credito esaurito (il caso più frequente)
+    if "credit balance is too low" in testo or "plans & billing" in testo:
+        return ("Credito API Anthropic esaurito. Ricarica su "
+                "console.anthropic.com → Plans & Billing, poi riprova.")
+    # Rate limit
+    if isinstance(e, getattr(anthropic, "RateLimitError", ())) or "rate limit" in testo or "429" in testo:
+        return "Troppe richieste in poco tempo (rate limit). Attendi qualche secondo e riprova."
+    # Autenticazione / chiave non valida
+    if isinstance(e, getattr(anthropic, "AuthenticationError", ())) or "authentication" in testo or "invalid x-api-key" in testo:
+        return "Chiave API Anthropic non valida o mancante. Controlla ANTHROPIC_API_KEY."
+    # Server Anthropic sovraccarichi
+    if "overloaded" in testo or "529" in testo:
+        return "I server Anthropic sono temporaneamente sovraccarichi. Riprova tra poco."
+    # Fallback: messaggio generico ma senza JSON grezzo
+    return "Errore durante l'analisi AI. Riprova; se persiste controlla credito e chiave API."
+
+
 def clean_text(testo: str) -> str:
     """
     Sanitizza il testo prima di mandarlo all'API:
@@ -458,7 +481,7 @@ def analizza_profilo_linkedin_stream(
         yield f"data: {json.dumps({'type': 'errore', 'messaggio': 'Risposta AI non parsabile come JSON.'})}\n\n"
     except Exception as e:
         logger.error("[AI] analizza_profilo_linkedin_stream — errore: %s", e, exc_info=True)
-        yield f"data: {json.dumps({'type': 'errore', 'messaggio': str(e)})}\n\n"
+        yield f"data: {json.dumps({'type': 'errore', 'messaggio': messaggio_errore_ai(e)})}\n\n"
 
 
 def rigenera_messaggio_outreach(testo_profilo: str, messaggio_attuale: str, istruzioni: str = "") -> str:

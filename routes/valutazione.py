@@ -10,7 +10,7 @@ import os
 import re
 import requests
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, Response
-from ai_helpers import analizza_profilo_linkedin, rigenera_messaggio_outreach, analizza_profilo_linkedin_stream
+from ai_helpers import analizza_profilo_linkedin, rigenera_messaggio_outreach, analizza_profilo_linkedin_stream, messaggio_errore_ai
 from database import get_db
 
 APIFY_BASE  = "https://api.apify.com/v2"
@@ -40,7 +40,10 @@ def analizza():
         return jsonify({"errore": "Inserire il testo del profilo LinkedIn"}), 400
 
     # Chiama Claude per l'analisi
-    risultato = analizza_profilo_linkedin(testo_profilo, tipo_profilo)
+    try:
+        risultato = analizza_profilo_linkedin(testo_profilo, tipo_profilo)
+    except Exception as e:
+        return jsonify({"errore": messaggio_errore_ai(e)}), 500
 
     spunti_json = json.dumps(risultato["spunti_contatto"], ensure_ascii=False)
     # Anteprima: prime 120 caratteri del testo profilo

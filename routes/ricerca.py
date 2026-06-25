@@ -15,7 +15,7 @@ import uuid
 import requests
 from flask import Blueprint, render_template, request, jsonify, Response
 from database import get_db
-from ai_helpers import analizza_profilo_linkedin
+from ai_helpers import analizza_profilo_linkedin, messaggio_errore_ai
 from dedup import is_duplicate
 
 log = logging.getLogger(__name__)
@@ -1538,7 +1538,8 @@ def analizza_candidato():
             risultato = analizza_profilo_linkedin(testo_profilo, tipo_profilo, imp)
         except Exception as e:
             db.close()
-            return jsonify({"errore": str(e)}), 500
+            log.exception("Errore analisi AI candidato")
+            return jsonify({"errore": messaggio_errore_ai(e)}), 500
 
     # Coercion tipi: ogni valore dal risultato AI deve essere del tipo giusto per PostgreSQL
     def _s(v, fallback=None):
@@ -1685,6 +1686,13 @@ def dettaglio_ricerca(ricerca_id):
            FROM profili_ricerca pr
            LEFT JOIN candidati c ON pr.candidato_id = c.id
            WHERE pr.ricerca_id = ?
+             AND NOT EXISTS (
+                 SELECT 1 FROM profili_scartati ps
+                 WHERE (COALESCE(pr.linkedin_url,'') <> '' AND ps.linkedin_url = pr.linkedin_url)
+                    OR (COALESCE(pr.linkedin_url,'') = ''
+                        AND LOWER(TRIM(ps.nome))    = LOWER(TRIM(pr.nome))
+                        AND LOWER(TRIM(ps.cognome)) = LOWER(TRIM(pr.cognome)))
+             )
            ORDER BY c.punteggio DESC NULLS LAST, pr.id""",
         (ricerca_id,)
     ).fetchall()
@@ -1707,6 +1715,13 @@ def dettaglio_ricerca(ricerca_id):
                       stato
                FROM candidati
                WHERE ricerca_id = ?
+                 AND NOT EXISTS (
+                     SELECT 1 FROM profili_scartati ps
+                     WHERE (COALESCE(candidati.profilo_linkedin,'') <> '' AND ps.linkedin_url = candidati.profilo_linkedin)
+                        OR (COALESCE(candidati.profilo_linkedin,'') = ''
+                            AND LOWER(TRIM(ps.nome))    = LOWER(TRIM(candidati.nome))
+                            AND LOWER(TRIM(ps.cognome)) = LOWER(TRIM(candidati.cognome)))
+                 )
                ORDER BY punteggio DESC NULLS LAST""",
             (ricerca_id,)
         ).fetchall()
@@ -1793,14 +1808,34 @@ def importa():
 
     _gestore = "Salvatore Sabia" if tipo_profilo == "A" else ("Firdaous Filahi" if tipo_profilo == "B" else "Non assegnato")
     db = get_db()
-    cur = db.execute(
-        """INSERT INTO candidati
-           (nome, cognome, ruolo_attuale, azienda, profilo_linkedin, tipo_profilo, note, gestore)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (nome, cognome, ruolo_attuale, azienda, linkedin, tipo_profilo, note, _gestore),
-    )
-    db.commit()
-    nuovo_id = cur.lastrowid
+
+    # Deduplicazione: blocca i doppioni PRIMA dell'INSERT, evitando l'errore
+    # sull'indice UNIQUE profilo_linkedin (che altrimenti aborta la transazione).
+    dup, motivo_dup, cand_id_esistente = is_duplicate(db, {
+        "nome": nome, "cognome": cognome,
+        "azienda": azienda, "ruolo": ruolo_attuale, "linkedin": linkedin,
+    })
+    if dup:
+        db.close()
+        return jsonify({
+            "duplicato": True,
+            "motivo": motivo_dup,
+            "candidato_id": cand_id_esistente,
+        }), 409
+
+    try:
+        cur = db.execute(
+            """INSERT INTO candidati
+               (nome, cognome, ruolo_attuale, azienda, profilo_linkedin, tipo_profilo, note, gestore)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (nome, cognome, ruolo_attuale, azienda, linkedin, tipo_profilo, note, _gestore),
+        )
+        db.commit()
+        nuovo_id = cur.lastrowid
+    except Exception:
+        db.close()
+        log.exception("Errore import candidato %s %s", nome, cognome)
+        return jsonify({"errore": "Impossibile importare il candidato (forse già presente in pipeline)."}), 500
     db.close()
 
     return jsonify({"successo": True, "candidato_id": nuovo_id})

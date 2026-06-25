@@ -583,7 +583,10 @@ async function avviaAnalisi() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ testo_profilo: testo, tipo_profilo: tipoProfilo, candidato_id: candidatoId, risultato: risultatoFinale })
-        }).catch(function(e) { console.warn('[stream] salvataggio fallito:', e); });
+        }).catch(function(e) {
+            console.warn('[stream] salvataggio fallito:', e);
+            mostraErrore('Analisi mostrata ma NON salvata (errore di rete). Riprova.');
+        });
 
     } catch (err) {
         previewEl.classList.add('hidden');

@@ -444,11 +444,24 @@ function _salvaDettaglio(idx, dati, btnEl) {
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
+        // Il server può rispondere con errore (es. credito AI) o duplicato:
+        // in quel caso l'analisi NON è stata salvata → avvisa, non fingere successo.
+        if (data && (data.errore || data.duplicato)) {
+            var statusEl = document.getElementById('modal-report-status');
+            if (statusEl) statusEl.textContent =
+                '⚠ Analisi NON salvata: ' + (data.errore || data.motivo || 'profilo già presente');
+            return;
+        }
         aggiornaRiga(idx, Object.assign({}, dati, data));
         var savedEl = document.getElementById('modal-report-saved');
         if (savedEl) savedEl.classList.remove('hidden');
     })
-    .catch(function(err) { console.error('[salva dettaglio]', err); })
+    .catch(function(err) {
+        console.error('[salva dettaglio]', err);
+        var statusEl = document.getElementById('modal-report-status');
+        if (statusEl) statusEl.textContent =
+            '⚠ Analisi mostrata ma NON salvata (errore di rete). Riprova.';
+    })
     .finally(function() {
         if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '&#9733; Analizza'; }
     });

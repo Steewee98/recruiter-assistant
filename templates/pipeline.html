@@ -1405,7 +1405,10 @@ async function avviaAnalisi() {
                     candidatiData[cIdx].dati_arricchiti = JSON.stringify(datiArricchiti);
                 }
             }
-        }).catch(function(e) { console.warn('[valutazione] salvataggio fallito:', e); });
+        }).catch(function(e) {
+            console.warn('[valutazione] salvataggio fallito:', e);
+            alert('⚠ Analisi mostrata ma NON salvata (errore di rete). Riprova.');
+        });
 
     } catch(err) {
         previewEl.classList.add('hidden');
