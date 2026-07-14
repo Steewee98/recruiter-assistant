@@ -62,7 +62,7 @@ def salva():
 
     campi_int = ["eta_min", "eta_max", "anni_esperienza_min",
                  "peso_eta", "peso_esperienza", "peso_settore", "peso_ruolo", "peso_keyword"]
-    campi_txt = ["settori", "istituti", "ruoli_target", "keyword_positive", "keyword_negative"]
+    campi_txt = ["citta", "settori", "istituti", "ruoli_target", "keyword_positive", "keyword_negative"]
 
     vals = {}
     for c in campi_int:
@@ -82,14 +82,14 @@ def salva():
         db.execute(
             """UPDATE impostazioni_profilo SET
                eta_min=?, eta_max=?, anni_esperienza_min=?,
-               settori=?, istituti=?, ruoli_target=?,
+               citta=?, settori=?, istituti=?, ruoli_target=?,
                keyword_positive=?, keyword_negative=?,
                peso_eta=?, peso_esperienza=?, peso_settore=?,
                peso_ruolo=?, peso_keyword=?,
                data_aggiornamento=CURRENT_TIMESTAMP
                WHERE profilo=?""",
             (vals["eta_min"], vals["eta_max"], vals["anni_esperienza_min"],
-             vals["settori"], vals["istituti"], vals["ruoli_target"],
+             vals["citta"], vals["settori"], vals["istituti"], vals["ruoli_target"],
              vals["keyword_positive"], vals["keyword_negative"],
              vals["peso_eta"], vals["peso_esperienza"], vals["peso_settore"],
              vals["peso_ruolo"], vals["peso_keyword"], profilo)
@@ -98,13 +98,13 @@ def salva():
         db.execute(
             """INSERT INTO impostazioni_profilo
                (profilo, eta_min, eta_max, anni_esperienza_min,
-                settori, istituti, ruoli_target,
+                citta, settori, istituti, ruoli_target,
                 keyword_positive, keyword_negative,
                 peso_eta, peso_esperienza, peso_settore,
                 peso_ruolo, peso_keyword)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (profilo, vals["eta_min"], vals["eta_max"], vals["anni_esperienza_min"],
-             vals["settori"], vals["istituti"], vals["ruoli_target"],
+             vals["citta"], vals["settori"], vals["istituti"], vals["ruoli_target"],
              vals["keyword_positive"], vals["keyword_negative"],
              vals["peso_eta"], vals["peso_esperienza"], vals["peso_settore"],
              vals["peso_ruolo"], vals["peso_keyword"])

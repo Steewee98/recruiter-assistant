@@ -248,6 +248,7 @@ def init_db():
             eta_min             INTEGER DEFAULT 0,
             eta_max             INTEGER DEFAULT 99,
             anni_esperienza_min INTEGER DEFAULT 0,
+            citta               TEXT DEFAULT '',
             settori             TEXT DEFAULT '',
             istituti            TEXT DEFAULT '',
             ruoli_target        TEXT DEFAULT '',
@@ -319,6 +320,9 @@ def init_db():
         "ALTER TABLE job_ricerche ADD COLUMN IF NOT EXISTS percentuale INTEGER DEFAULT 0",
         # Gestore candidato
         "ALTER TABLE candidati ADD COLUMN IF NOT EXISTS gestore TEXT DEFAULT 'Non assegnato'",
+
+        # Città di provenienza: filtro geografico bloccante per profilo
+        "ALTER TABLE impostazioni_profilo ADD COLUMN IF NOT EXISTS citta TEXT DEFAULT ''",
 
         # Migrazione stati: Risposto e In valutazione → Contattati (stati rimossi)
         "UPDATE candidati SET stato = 'Contattati' WHERE stato IN ('Risposto', 'In valutazione')",

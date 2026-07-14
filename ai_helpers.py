@@ -136,6 +136,12 @@ def analizza_profilo_linkedin(testo_profilo: str, tipo_profilo: str, impostazion
     testo_profilo = clean_text(testo_profilo)
 
     if impostazioni:
+        citta_target = (impostazioni.get('citta', '') or '').strip()
+        vincolo_citta = (
+            f" VINCOLO OBBLIGATORIO: il candidato deve provenire da {citta_target}. "
+            f"Se il profilo NON è di {citta_target}, assegna punteggio 1 e segnalalo nell'analisi."
+            if citta_target else ""
+        )
         if tipo_profilo == "A":
             descrizione_profilo = (
                 f"Profilo A (Senior): età tra {impostazioni.get('eta_min', 40)} e "
@@ -145,6 +151,7 @@ def analizza_profilo_linkedin(testo_profilo: str, tipo_profilo: str, impostazion
                 f"Ruoli target: {impostazioni.get('ruoli_target', '')}. "
                 f"Segnali positivi (favoriscono la valutazione): {impostazioni.get('keyword_positive', '')}. "
                 f"Segnali negativi (penalizzano la valutazione): {impostazioni.get('keyword_negative', '')}."
+                f"{vincolo_citta}"
             )
         else:
             descrizione_profilo = (
@@ -155,6 +162,7 @@ def analizza_profilo_linkedin(testo_profilo: str, tipo_profilo: str, impostazion
                 f"Ruoli target: {impostazioni.get('ruoli_target', '')}. "
                 f"Segnali positivi (favoriscono la valutazione): {impostazioni.get('keyword_positive', '')}. "
                 f"Segnali negativi (penalizzano la valutazione): {impostazioni.get('keyword_negative', '')}."
+                f"{vincolo_citta}"
             )
         p_eta = impostazioni.get('peso_eta', 5)
         p_esp = impostazioni.get('peso_esperienza', 5)

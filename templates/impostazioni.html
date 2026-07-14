@@ -56,6 +56,23 @@
             </div>
         </div>
 
+        <div class="card" style="margin-bottom:1.25rem;border-left:4px solid var(--azzurro,#2E7CF6);">
+            <div class="card-header"><h3>&#128205; Città di provenienza <span class="form-hint">— filtro obbligatorio</span></h3></div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label class="form-label">Città target</label>
+                    <input type="text" name="citta" class="form-input"
+                           placeholder="es. Roma"
+                           value="{{ imp_a.get('citta', '') }}">
+                    <p style="color:var(--grigio-testo);font-size:0.8125rem;margin-top:0.5rem;">
+                        Se compilata, la ricerca cerca <strong>solo</strong> in questa città e
+                        <strong>scarta automaticamente</strong> i profili che non ne provengono.
+                        Lascia vuoto per cercare in tutte le città.
+                    </p>
+                </div>
+            </div>
+        </div>
+
         <div class="card" style="margin-bottom:1.25rem;">
             <div class="card-header"><h3>Parole chiave</h3></div>
             <div class="card-body">
@@ -144,6 +161,23 @@
                     <input type="text" name="ruoli_target" class="form-input"
                            placeholder="es. Analista finanziario, Relationship Manager, Credit Analyst..."
                            value="{{ imp_b.get('ruoli_target', '') }}">
+                </div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-bottom:1.25rem;border-left:4px solid var(--azzurro,#2E7CF6);">
+            <div class="card-header"><h3>&#128205; Città di provenienza <span class="form-hint">— filtro obbligatorio</span></h3></div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label class="form-label">Città target</label>
+                    <input type="text" name="citta" class="form-input"
+                           placeholder="es. Milano"
+                           value="{{ imp_b.get('citta', '') }}">
+                    <p style="color:var(--grigio-testo);font-size:0.8125rem;margin-top:0.5rem;">
+                        Se compilata, la ricerca cerca <strong>solo</strong> in questa città e
+                        <strong>scarta automaticamente</strong> i profili che non ne provengono.
+                        Lascia vuoto per cercare in tutte le città.
+                    </p>
                 </div>
             </div>
         </div>

@@ -207,6 +207,56 @@ def _normalizza_citta(citta: str) -> str:
     return citta.strip()
 
 
+# Gruppi di alias città IT/EN: usati per il matching bloccante sul profilo.
+# Apify restituisce la location in inglese ("Milan, Italy"), l'utente scrive in italiano.
+_CITTA_GRUPPI_ALIAS = [
+    {'roma', 'rome'},
+    {'milano', 'milan'},
+    {'torino', 'turin'},
+    {'napoli', 'naples'},
+    {'firenze', 'florence'},
+    {'genova', 'genoa'},
+    {'venezia', 'venice'},
+    {'padova', 'padua'},
+    {'bologna'},
+    {'palermo'},
+    {'verona'},
+    {'bari'},
+]
+
+
+def _citta_aliases(citta: str) -> set:
+    """
+    Restituisce l'insieme dei token (lowercase) che identificano la città target.
+    Include le varianti IT/EN note; per città non mappate usa il nome così com'è.
+    """
+    if not citta:
+        return set()
+    # Prende solo la prima parte (prima di eventuale ", Regione, Paese")
+    key = citta.strip().lower().split(',')[0].strip()
+    if not key:
+        return set()
+    for gruppo in _CITTA_GRUPPI_ALIAS:
+        if key in gruppo:
+            return set(gruppo)
+    return {key}
+
+
+def _matches_citta(location: str, citta_target: str) -> bool:
+    """
+    True se la location del profilo corrisponde alla città target configurata.
+    Se la location è vuota/sconosciuta, NON blocca (la ricerca Apify è già
+    geo-filtrata sulla città): meglio far passare che perdere un profilo valido.
+    """
+    aliases = _citta_aliases(citta_target)
+    if not aliases:
+        return True   # nessuna città configurata → nessun vincolo
+    loc = (location or '').lower()
+    if not loc.strip():
+        return True   # location ignota → non blocco
+    return any(a in loc for a in aliases)
+
+
 def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pagine=1,
                 ruoli_lista=None, forza_italia=True, progress_cb=None, start_page=1):
     """
@@ -440,6 +490,12 @@ def _filtro_locale(p: dict, imp: dict) -> tuple:
 
     if not testo.strip() and not p.get('nome') and not p.get('cognome'):
         return False, "Profilo vuoto o senza dati"
+
+    # 0. Città di provenienza → filtro BLOCCANTE prioritario.
+    #    Se configurata, il profilo DEVE provenire da quella città, altrimenti scartato.
+    citta_target = (imp.get('citta', '') or '').strip()
+    if citta_target and not _matches_citta(p.get('location', ''), citta_target):
+        return False, f"Città non corrispondente (richiesta: {citta_target})"
 
     # 1. Keyword negative → scarto immediato
     kw_neg = [k.strip().lower() for k in (imp.get('keyword_negative', '') or '').split(',') if k.strip()]
@@ -1125,6 +1181,12 @@ def _esegui_ricerca_background(job_id, tipo_profilo, max_profili, imp):
 
         # Città fissa per tutta la sessione di ricerca (ruota tra ricerche diverse)
         citta_corrente  = citta_lista[_ic % _nc]
+        # Se l'utente ha configurato una città di provenienza, la ricerca si limita
+        # a quella città (niente rotazione): filtro geografico bloccante.
+        citta_config = (imp.get('citta', '') or '').strip()
+        if citta_config:
+            citta_corrente = _normalizza_citta(citta_config)
+            log.info("Città di provenienza configurata: ricerca limitata a %r", citta_corrente)
         ruolo_principale = ruoli[_ir % _nr] if ruoli else ""
         start_page_base  = (_off // 10) + 1   # 1..10
 
