@@ -5,3 +5,9 @@ __pycache__/
 *.db
 .DS_Store
 .claude/
+
+# Backup env e artefatti
+.env.save
+export/
+*.pdf
+=4.2.0

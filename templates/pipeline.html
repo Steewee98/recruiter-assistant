@@ -159,6 +159,11 @@
                                 Follow-up
                             </button>
                             <button class="btn btn-outline btn-xs"
+                                    onclick="triangolaContatto({{ c.id }}, '{{ c.nome }} {{ c.cognome }}')"
+                                    title="Incrocia LinkedIn + OCF + riconoscimenti">
+                                &#9651; Triangola
+                            </button>
+                            <button class="btn btn-outline btn-xs"
                                     onclick="attivaTab('calendario');setTimeout(function(){apriModalNuovoApp('{{ c.id }}');},100)">
                                 &#128197;
                             </button>
@@ -703,6 +708,23 @@
     </div>
 </div>
 
+<!-- Modal Triangolazione -->
+<div id="modal-triangola" class="modal-overlay hidden" onclick="chiudiTriangola(event)">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="triangola-titolo">Triangolazione contatto</h3>
+            <button class="modal-close" onclick="chiudiTriangola()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="triangola-loading" class="text-center">
+                <span class="spinner"></span> Incrocio LinkedIn + OCF + riconoscimenti...
+            </div>
+            <div id="triangola-errore" class="hidden" style="color:#dc2626;padding:0.5rem 0;"></div>
+            <div id="triangola-content" class="hidden"></div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal Note (Pipeline) -->
 <div id="modal-note" class="modal-overlay hidden" onclick="chiudiModalNote(event)">
     <div class="modal">
@@ -1144,6 +1166,80 @@ function chiudiModal(event) {
 }
 function chiudiModalFollowup(event) {
     if (!event || event.target === document.getElementById('modal-followup')) nascondi('modal-followup');
+}
+
+/* ── Triangolazione contatto ───────────────────────────── */
+function chiudiTriangola(event) {
+    if (!event || event.target === document.getElementById('modal-triangola')) nascondi('modal-triangola');
+}
+function _fonteBadge(label, r) {
+    var ok = r && (r.trovato || r.iscritto_ocf);
+    var col = ok ? '#16a34a' : (r && r.ok ? '#64748b' : '#f0b429');
+    var stato = ok ? 'trovato' : (r && r.errore ? 'non verificato' : 'nessun match');
+    return '<span style="display:inline-block;font-size:.72rem;font-weight:600;padding:2px 8px;border-radius:20px;'
+         + 'background:' + col + '22;color:' + col + ';margin-right:6px;">' + label + ': ' + stato + '</span>';
+}
+async function triangolaContatto(id, nome) {
+    document.getElementById('triangola-titolo').textContent = 'Triangolazione — ' + nome;
+    mostra('modal-triangola');
+    mostra('triangola-loading');
+    nascondi('triangola-content');
+    nascondi('triangola-errore');
+    try {
+        const resp = await fetch('/pipeline/triangola/' + id, { method: 'POST' });
+        const data = await resp.json();
+        nascondi('triangola-loading');
+        if (!resp.ok) {
+            const e = document.getElementById('triangola-errore');
+            e.textContent = data.errore || 'Triangolazione non riuscita.';
+            mostra('triangola-errore');
+            return;
+        }
+        const d = data.dossier, f = data.fonti || {};
+        const cc = d.come_contattarlo || {};
+        const pref = d.preferenza_vs_linkedin != null ? d.preferenza_vs_linkedin + '/10' : '—';
+        const conf = d.confidenza_dati != null ? d.confidenza_dati + '/10' : '—';
+        const prioColore = d.priorita === 'alta' ? '#16a34a' : (d.priorita === 'bassa' ? '#94a3b8' : '#f0b429');
+        var html = ''
+          + '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem;">'
+          + _fonteBadge('OCF', f.ocf) + _fonteBadge('Riconoscimenti', f.riconoscimenti) + '</div>'
+          + '<div style="display:flex;gap:1rem;margin-bottom:.9rem;flex-wrap:wrap;">'
+          + '<div><div style="font-size:.7rem;color:#64748b;text-transform:uppercase;">Preferenza vs LinkedIn</div>'
+          + '<div style="font-size:1.5rem;font-weight:700;color:#1A2E4A;">' + pref + '</div></div>'
+          + '<div><div style="font-size:.7rem;color:#64748b;text-transform:uppercase;">Confidenza dati</div>'
+          + '<div style="font-size:1.5rem;font-weight:700;color:#1A2E4A;">' + conf + '</div></div>'
+          + '<div><div style="font-size:.7rem;color:#64748b;text-transform:uppercase;">Priorità</div>'
+          + '<div style="font-size:1.1rem;font-weight:700;color:' + prioColore + ';text-transform:capitalize;margin-top:.35rem;">'
+          + (d.priorita || '—') + '</div></div></div>';
+        if (d.sintesi_triangolazione)
+            html += '<p style="margin:.4rem 0;">' + d.sintesi_triangolazione + '</p>';
+        if (d.motivazione_preferenza)
+            html += '<p style="margin:.4rem 0;color:#475569;font-size:.9rem;"><b>Perché:</b> ' + d.motivazione_preferenza + '</p>';
+        if (d.coerenza_fonti)
+            html += '<p style="margin:.4rem 0;color:#475569;font-size:.9rem;"><b>Coerenza fonti:</b> ' + d.coerenza_fonti + '</p>';
+        var ric = d.riconoscimenti_rilevati || [];
+        if (ric.length)
+            html += '<p style="margin:.4rem 0;"><b>Riconoscimenti:</b> ' + ric.join(' · ') + '</p>';
+        var bnd = d.bandierine || [];
+        if (bnd.length)
+            html += '<p style="margin:.4rem 0;color:#dc2626;font-size:.9rem;"><b>&#9888; Attenzione:</b> ' + bnd.join(' · ') + '</p>';
+        html += '<div style="margin-top:1rem;padding:.9rem 1rem;background:#f8fafc;border-left:3px solid #2E7CF6;border-radius:0 8px 8px 0;">'
+          + '<div style="font-size:.72rem;color:#64748b;text-transform:uppercase;letter-spacing:.4px;margin-bottom:.35rem;">Come contattarlo</div>'
+          + '<p style="margin:.2rem 0;"><b>Canale:</b> ' + (cc.canale_consigliato || '—') + '</p>'
+          + (cc.approccio ? '<p style="margin:.2rem 0;font-size:.9rem;">' + cc.approccio + '</p>' : '');
+        if (cc.bozza_messaggio)
+            html += '<div class="outreach-box" style="margin-top:.5rem;">' + cc.bozza_messaggio + '</div>'
+                 + '<button class="btn btn-outline btn-sm" style="margin-top:.5rem;" onclick="navigator.clipboard.writeText(' + JSON.stringify(cc.bozza_messaggio) + ');this.textContent=\'Copiato\'">Copia messaggio</button>';
+        html += '</div>';
+        const c = document.getElementById('triangola-content');
+        c.innerHTML = html;
+        mostra('triangola-content');
+    } catch (err) {
+        nascondi('triangola-loading');
+        const e = document.getElementById('triangola-errore');
+        e.textContent = 'Errore di rete durante la triangolazione.';
+        mostra('triangola-errore');
+    }
 }
 function getScoreClass(score) {
     if (score >= 8) return 'score-alto';

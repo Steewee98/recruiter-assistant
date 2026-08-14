@@ -598,6 +598,119 @@ def index():
                            cronologia=cronologia)
 
 
+def _parametri_da_profilo(tipo_profilo: str) -> dict:
+    """Costruisce i parametri di ricerca dal profilo A/B salvato in impostazioni_profilo."""
+    db = get_db()
+    imp = db.execute("SELECT * FROM impostazioni_profilo WHERE profilo=?", (tipo_profilo,)).fetchone()
+    db.close()
+    if not imp:
+        return {"ruolo": "", "citta": "", "azienda": "", "parole_chiave": ""}
+    imp = dict(imp)
+
+    def _primo(campo):
+        v = (imp.get(campo) or "").replace("\n", ",")
+        parti = [p.strip() for p in v.split(",") if p.strip()]
+        return parti[0] if parti else ""
+
+    return {
+        "ruolo": _primo("ruoli_target"),
+        "citta": _primo("citta"),
+        "azienda": "",
+        "parole_chiave": (imp.get("keyword_positive") or "").replace("\n", " ").strip(),
+    }
+
+
+@ricerca_bp.route("/ricerca/smart/cerca", methods=["POST"])
+def smart_cerca():
+    """
+    Ricerca smart (barra stile Google). Fase 1: interpreta la richiesta e restituisce
+    fino a ~20 profili pronti per essere triangolati dal client (fase 2).
+
+    Body JSON: { "query": "<frase libera>", "tipo_profilo": "A"|"B" }
+    Se query è vuota, usa i parametri del profilo A/B salvato.
+    """
+    from ai_helpers import interpreta_query_ricerca
+
+    dati = request.get_json() or {}
+    query = (dati.get("query") or "").strip()
+    tipo_profilo = dati.get("tipo_profilo", "A")
+    TARGET = 20
+
+    # 1) Parametri: dalla frase (AI) oppure dal profilo salvato
+    if query:
+        params = interpreta_query_ricerca(query)
+        origine = "query"
+    else:
+        params = _parametri_da_profilo(tipo_profilo)
+        origine = "profilo"
+
+    if not params.get("ruolo") and not params.get("parole_chiave"):
+        return jsonify({"errore": "Ricerca vuota: scrivi cosa cerchi o configura il profilo di ricerca."}), 400
+
+    # 2) Ricerca Apify (fino a 3 pagine per raccogliere abbastanza profili nuovi)
+    db = get_db()
+    profili, visti = [], set()
+    primo_errore = None
+    for start_page in range(1, 4):
+        if len(profili) >= TARGET:
+            break
+        items, errore = cerca_apify(
+            params.get("ruolo", ""), params.get("citta", ""), "",
+            params.get("azienda", ""), params.get("parole_chiave", ""),
+            num_pagine=1, start_page=start_page,
+        )
+        if errore:
+            primo_errore = primo_errore or errore
+            continue
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            p = normalizza_profilo(item)
+            chiave = (p.get("linkedin") or "").lower() or \
+                     f"{p.get('nome','')}|{p.get('cognome','')}".lower()
+            if chiave in visti:
+                continue
+            visti.add(chiave)
+            dup, _motivo, cand_id = is_duplicate(db, p)
+            if dup:
+                continue  # escludi chi è già in pipeline o scartato
+            profili.append({
+                "nome": p.get("nome", ""), "cognome": p.get("cognome", ""),
+                "ruolo": p.get("ruolo", ""), "azienda": p.get("azienda", ""),
+                "location": p.get("location", ""), "linkedin": p.get("linkedin", ""),
+                "sommario": p.get("sommario", ""),
+            })
+            if len(profili) >= TARGET:
+                break
+    db.close()
+
+    if not profili and primo_errore:
+        return jsonify({"errore": messaggio_errore_ai(Exception(primo_errore))
+                        if "api" in primo_errore.lower() else primo_errore}), 502
+
+    return jsonify({"ok": True, "origine": origine, "parametri": params,
+                    "profili": profili, "totale": len(profili)})
+
+
+@ricerca_bp.route("/ricerca/smart/dossier", methods=["POST"])
+def smart_dossier():
+    """
+    Fase 2: triangola UN profilo trovato dalla ricerca smart e ritorna il dossier.
+    Il client chiama questo endpoint per ciascun profilo (in progressivo).
+    Body JSON: { "profilo": {...} }
+    """
+    dati = request.get_json() or {}
+    profilo = dati.get("profilo") or {}
+    if not profilo.get("cognome"):
+        return jsonify({"errore": "Profilo senza cognome: impossibile triangolare."}), 400
+
+    from services.triangolazione import triangola_da_profilo
+    esito = triangola_da_profilo(profilo, usa_esterni=True)
+    if not esito.get("ok"):
+        return jsonify({"errore": esito.get("errore", "Triangolazione non riuscita")}), 502
+    return jsonify(esito)
+
+
 def _nome_corrisponde(cercato: str, nome_profilo: str, cognome_profilo: str) -> bool:
     """
     Verifica che il profilo restituito corrisponda al nome cercato.

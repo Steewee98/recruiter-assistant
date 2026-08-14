@@ -4,8 +4,38 @@
 {% block content %}
 <div class="page-header">
     <h1 class="page-title">Ricerca Candidati</h1>
-    <p class="page-subtitle">Trova figure professionali su LinkedIn tramite Apify e importale nella pipeline</p>
+    <p class="page-subtitle">Descrivi chi cerchi: ricevi direttamente i dossier triangolati dei profili in linea</p>
 </div>
+
+<!-- ===== RICERCA SMART (barra stile Google) ===== -->
+<div class="smart-wrap" style="max-width:820px;margin:0 auto 1.5rem;">
+    <div style="display:flex;gap:0.6rem;align-items:stretch;">
+        <input type="text" id="smart-query" class="form-input"
+               placeholder="Es. Private banker a Milano con esperienza in reti…"
+               style="flex:1;font-size:1.05rem;padding:0.9rem 1.1rem;border-radius:30px;"
+               onkeydown="if(event.key==='Enter')smartCerca();">
+        <button class="btn btn-primary" id="smart-btn" onclick="smartCerca()"
+                style="border-radius:30px;padding:0 1.6rem;font-size:1rem;">
+            <span id="smart-btn-testo">&#128269; Cerca</span>
+            <span id="smart-btn-loading" class="hidden"><span class="spinner"></span></span>
+        </button>
+    </div>
+    <div style="display:flex;align-items:center;gap:0.8rem;margin-top:0.7rem;justify-content:center;flex-wrap:wrap;">
+        <span style="font-size:0.8rem;color:var(--grigio-testo);">Se lasci vuoto, uso il profilo:</span>
+        <label style="font-size:0.85rem;"><input type="radio" name="smart-tipo" value="A" checked> Profilo A</label>
+        <label style="font-size:0.85rem;"><input type="radio" name="smart-tipo" value="B"> Profilo B</label>
+        <span style="font-size:0.75rem;color:var(--grigio-testo);">· Ogni profilo viene triangolato (LinkedIn + OCF + riconoscimenti)</span>
+    </div>
+</div>
+
+<!-- Stato e risultati smart -->
+<div id="smart-stato" class="hidden" style="max-width:820px;margin:0 auto 0.6rem;font-size:0.85rem;color:var(--blu-scuro);text-align:center;"></div>
+<div id="smart-errore" class="hidden" style="max-width:820px;margin:0 auto 1rem;color:#dc2626;text-align:center;"></div>
+<div id="smart-risultati" style="max-width:1000px;margin:0 auto 2rem;display:grid;grid-template-columns:1fr 1fr;gap:1rem;"></div>
+
+<details style="max-width:1000px;margin:0 auto 1.5rem;">
+    <summary style="cursor:pointer;color:var(--grigio-testo);font-size:0.9rem;">Ricerca avanzata (parametri e strumenti classici)</summary>
+</details>
 
 <!-- ===== 3 COLONNE RICERCA ===== -->
 <div class="ricerca-grid">
@@ -328,6 +358,144 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+/* ══════════ RICERCA SMART — barra → dossier triangolati ══════════ */
+function _tipoSmart() {
+    var r = document.querySelector('input[name="smart-tipo"]:checked');
+    return r ? r.value : 'A';
+}
+function _escapeHtml(s) {
+    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+async function smartCerca() {
+    var query = document.getElementById('smart-query').value.trim();
+    var cont = document.getElementById('smart-risultati');
+    var stato = document.getElementById('smart-stato');
+    var errore = document.getElementById('smart-errore');
+    cont.innerHTML = '';
+    nascondi('smart-errore');
+    mostra('smart-stato');
+    stato.textContent = 'Cerco i profili in linea…';
+    document.getElementById('smart-btn-testo').classList.add('hidden');
+    mostra('smart-btn-loading');
+    try {
+        var resp = await fetch('/ricerca/smart/cerca', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ query: query, tipo_profilo: _tipoSmart() })
+        });
+        var data = await resp.json();
+        if (!resp.ok) {
+            errore.textContent = data.errore || 'Ricerca non riuscita.';
+            mostra('smart-errore'); nascondi('smart-stato');
+            return;
+        }
+        var profili = data.profili || [];
+        if (!profili.length) {
+            stato.textContent = 'Nessun nuovo profilo trovato (esclusi quelli già in pipeline). Prova a riformulare.';
+            return;
+        }
+        var origine = data.origine === 'profilo' ? 'profilo ' + _tipoSmart() : 'la tua richiesta';
+        stato.textContent = 'Trovati ' + profili.length + ' profili in linea con ' + origine + '. Triangolo tutti…';
+        // Crea le card skeleton
+        profili.forEach(function(p, i) {
+            var el = document.createElement('div');
+            el.className = 'dossier-card';
+            el.id = 'dossier-' + i;
+            el.style.cssText = 'border:1px solid var(--bordo,#e2e8f0);border-radius:14px;padding:1rem 1.2rem;background:#fff;';
+            el.innerHTML = '<div style="font-weight:700;color:var(--blu-scuro);">'
+                + _escapeHtml((p.nome||'') + ' ' + (p.cognome||'')) + '</div>'
+                + '<div style="font-size:0.85rem;color:var(--grigio-testo);margin:0.15rem 0 0.6rem;">'
+                + _escapeHtml(p.ruolo||'—') + (p.azienda ? ' · ' + _escapeHtml(p.azienda) : '') + '</div>'
+                + '<div class="dossier-body" style="font-size:0.85rem;color:var(--grigio-testo);">'
+                + '<span class="spinner"></span> Triangolazione in corso…</div>';
+            cont.appendChild(el);
+        });
+        // Triangola tutti con un pool di concorrenza (max 3 in parallelo)
+        var completati = 0;
+        await _poolTriangola(profili, 3, async function(p, i) {
+            await smartDossier(p, document.getElementById('dossier-' + i));
+            completati++;
+            stato.textContent = 'Triangolati ' + completati + '/' + profili.length + ' profili.';
+        });
+        stato.textContent = 'Fatto: ' + profili.length + ' dossier triangolati.';
+    } catch (e) {
+        errore.textContent = 'Errore di rete durante la ricerca.';
+        mostra('smart-errore'); nascondi('smart-stato');
+    } finally {
+        document.getElementById('smart-btn-testo').classList.remove('hidden');
+        nascondi('smart-btn-loading');
+    }
+}
+async function _poolTriangola(items, concorrenza, worker) {
+    var idx = 0;
+    async function next() {
+        var i = idx++;
+        if (i >= items.length) return;
+        try { await worker(items[i], i); } catch (e) {}
+        return next();
+    }
+    var runner = [];
+    for (var k = 0; k < Math.min(concorrenza, items.length); k++) runner.push(next());
+    await Promise.all(runner);
+}
+async function smartDossier(profilo, cardEl) {
+    if (!cardEl) return;
+    var body = cardEl.querySelector('.dossier-body');
+    try {
+        var resp = await fetch('/ricerca/smart/dossier', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ profilo: profilo })
+        });
+        var data = await resp.json();
+        if (!resp.ok) { body.innerHTML = '<span style="color:#dc2626;">' + (data.errore||'Errore') + '</span>'; return; }
+        var d = data.dossier, f = data.fonti || {};
+        var cc = d.come_contattarlo || {};
+        var pref = d.preferenza_vs_linkedin != null ? d.preferenza_vs_linkedin + '/10' : '—';
+        var prioColore = d.priorita === 'alta' ? '#16a34a' : (d.priorita === 'bassa' ? '#94a3b8' : '#f0b429');
+        function badge(label, r) {
+            var ok = r && (r.trovato || r.iscritto_ocf);
+            var col = ok ? '#16a34a' : '#94a3b8';
+            var st = ok ? 'trovato' : 'n/d';
+            return '<span style="font-size:.68rem;font-weight:600;padding:2px 7px;border-radius:20px;background:'
+                 + col + '22;color:' + col + ';margin-right:5px;">' + label + ': ' + st + '</span>';
+        }
+        var html = '<div style="display:flex;gap:0.4rem;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;">'
+            + '<span style="font-size:0.72rem;color:#64748b;text-transform:uppercase;">Preferenza</span>'
+            + '<b style="color:var(--blu-scuro);">' + pref + '</b>'
+            + '<span style="font-size:0.72rem;font-weight:700;color:' + prioColore + ';text-transform:capitalize;">· ' + (d.priorita||'—') + '</span>'
+            + '</div>'
+            + '<div style="margin-bottom:0.5rem;">' + badge('OCF', f.ocf) + badge('Riconoscimenti', f.riconoscimenti) + '</div>';
+        if (d.sintesi_triangolazione)
+            html += '<p style="font-size:0.85rem;margin:0.3rem 0;">' + _escapeHtml(d.sintesi_triangolazione) + '</p>';
+        if (cc.canale_consigliato)
+            html += '<p style="font-size:0.82rem;margin:0.3rem 0;"><b>Come contattarlo:</b> ' + _escapeHtml(cc.canale_consigliato)
+                 + (cc.approccio ? ' — ' + _escapeHtml(cc.approccio) : '') + '</p>';
+        if (cc.bozza_messaggio)
+            html += '<div class="outreach-box" style="font-size:0.8rem;margin:0.4rem 0;padding:0.5rem 0.7rem;background:#f8fafc;border-radius:8px;">' + _escapeHtml(cc.bozza_messaggio) + '</div>';
+        html += '<button class="btn btn-primary btn-sm" style="margin-top:0.4rem;" onclick=\'smartImporta(' + JSON.stringify(profilo) + ', this)\'>+ Aggiungi alla pipeline</button>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<span style="color:#dc2626;">Errore di rete.</span>';
+    }
+}
+async function smartImporta(profilo, btn) {
+    btn.disabled = true; btn.textContent = 'Aggiungo…';
+    try {
+        var resp = await fetch('/ricerca/importa', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                nome: profilo.nome, cognome: profilo.cognome, ruolo: profilo.ruolo,
+                azienda: profilo.azienda, linkedin: profilo.linkedin,
+                headline: profilo.ruolo, tipo_profilo: _tipoSmart()
+            })
+        });
+        var data = await resp.json();
+        if (resp.ok && data.successo) { btn.textContent = '✓ In pipeline'; btn.className = 'btn btn-outline btn-sm'; }
+        else if (data.duplicato) { btn.textContent = 'Già in pipeline'; }
+        else { btn.textContent = 'Errore'; btn.disabled = false; }
+    } catch (e) { btn.textContent = 'Errore rete'; btn.disabled = false; }
+}
+</script>
 <script>
 /* ------------------------------------------------------------------ */
 /* Stato globale                                                        */

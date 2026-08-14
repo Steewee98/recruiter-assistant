@@ -729,3 +729,117 @@ def genera_contenuti_linkedin(tema: str, tono: str, profilo: str,
     except Exception as e:
         logger.error("[AI] genera_contenuti_linkedin fallita: %s", e)
         raise
+
+
+def interpreta_query_ricerca(query: str) -> dict:
+    """
+    Traduce una frase in linguaggio naturale ("private banker a Milano con esperienza
+    in reti") nei parametri di ricerca strutturati usati da Apify.
+    Ritorna sempre un dict con le chiavi previste (stringhe, eventualmente vuote).
+    In caso di errore AI fa un fallback euristico mettendo l'intera query come ruolo.
+    """
+    query = clean_text(query or "").strip()
+    fallback = {"ruolo": query, "citta": "", "azienda": "", "parole_chiave": ""}
+    if not query:
+        return fallback
+
+    prompt = (
+        "Sei un assistente che trasforma una richiesta di ricerca candidati nel settore\n"
+        "bancario/consulenza finanziaria in parametri strutturati per un motore di ricerca profili.\n\n"
+        f"RICHIESTA: {query}\n\n"
+        "Estrai i parametri e rispondi ESCLUSIVAMENTE con questo JSON valido:\n"
+        "{\n"
+        '  "ruolo": "<il ruolo/figura principale, es. Private Banker>",\n'
+        '  "citta": "<città o area, vuoto se non indicata>",\n'
+        '  "azienda": "<azienda/rete specifica, vuoto se non indicata>",\n'
+        '  "parole_chiave": "<altre keyword rilevanti separate da spazio, vuoto se nessuna>"\n'
+        "}"
+    )
+    payload = {
+        "model": CLAUDE_MODEL,
+        "max_tokens": 300,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    try:
+        risposta = _chiama_api("interpreta_query_ricerca", payload)
+        testo = risposta.content[0].text.strip()
+        if testo.startswith("```"):
+            testo = testo.split("```")[1]
+            if testo.startswith("json"):
+                testo = testo[4:]
+        d = json.loads(testo)
+        return {
+            "ruolo": (d.get("ruolo") or "").strip() or query,
+            "citta": (d.get("citta") or "").strip(),
+            "azienda": (d.get("azienda") or "").strip(),
+            "parole_chiave": (d.get("parole_chiave") or "").strip(),
+        }
+    except Exception as e:
+        logger.warning("[AI] interpreta_query_ricerca fallita, uso fallback: %s", e)
+        return fallback
+
+
+def triangola_profilo(candidato: dict, ocf: dict, riconoscimenti: dict) -> dict:
+    """
+    Triangolazione di un contatto: incrocia i dati LinkedIn già in nostro possesso con
+    le verifiche esterne (albo OCF + riconoscimenti editoriali) per rispondere a due
+    domande operative:
+      1. "Ci piace più di quanto dica LinkedIn da solo?"  → preferenza_vs_linkedin
+      2. "Come lo contattiamo?"                            → come_contattarlo
+
+    Robustezza a cascata: `ocf` e `riconoscimenti` possono essere risultati vuoti/falliti
+    (le fonti degradano con grazia); l'AI deve comunque produrre un dossier, dichiarando
+    la confidenza in base a quante fonti hanno corroborato il dato.
+
+    Ritorna un dict (dossier). In caso di errore AI solleva: il caller traduce con
+    messaggio_errore_ai().
+    """
+    base = {
+        "nome": candidato.get("nome", ""),
+        "cognome": candidato.get("cognome", ""),
+        "ruolo_attuale": candidato.get("ruolo_attuale", ""),
+        "azienda": candidato.get("azienda", ""),
+        "punteggio_linkedin": candidato.get("punteggio"),
+        "analisi_linkedin": (candidato.get("analisi") or "")[:800],
+    }
+
+    prompt = (
+        "Sei un head-hunter senior nel private banking e nella consulenza finanziaria in Italia.\n"
+        "Devi TRIANGOLARE un contatto: hai già una valutazione basata su LinkedIn e due verifiche\n"
+        "esterne (albo OCF e riconoscimenti di settore). Alcune verifiche possono essere assenti o\n"
+        "non riuscite: in tal caso abbassa la confidenza, non inventare.\n\n"
+        f"DATI DA LINKEDIN (già nostri):\n{json.dumps(base, ensure_ascii=False)}\n\n"
+        f"VERIFICA ALBO OCF:\n{json.dumps(ocf, ensure_ascii=False)}\n\n"
+        f"RICONOSCIMENTI DI SETTORE:\n{json.dumps(riconoscimenti, ensure_ascii=False)}\n\n"
+        "Obiettivo: capire (1) se questo profilo ci piace PIÙ di quanto dica il solo LinkedIn,\n"
+        "una volta incrociate le fonti, e (2) come conviene contattarlo.\n\n"
+        "Rispondi ESCLUSIVAMENTE con questo JSON valido, senza testo attorno:\n"
+        "{\n"
+        '  "preferenza_vs_linkedin": <1-10, quanto sale/scende la nostra preferenza dopo la triangolazione>,\n'
+        '  "motivazione_preferenza": "<1-2 frasi: cosa aggiungono OCF e riconoscimenti rispetto a LinkedIn>",\n'
+        '  "priorita": "<alta|media|bassa>",\n'
+        '  "confidenza_dati": <1-10, quanto le fonti si corroborano a vicenda>,\n'
+        '  "coerenza_fonti": "<il ruolo/azienda dichiarato su LinkedIn è coerente con OCF? spiega>",\n'
+        '  "riconoscimenti_rilevati": ["<eventuali premi/menzioni, o vuoto>"],\n'
+        '  "sintesi_triangolazione": "<2-3 righe che uniscono le fonti in un giudizio unico>",\n'
+        '  "come_contattarlo": {\n'
+        '     "canale_consigliato": "<LinkedIn|Email|Telefono|Referral|Evento di settore>",\n'
+        '     "approccio": "<come impostare il primo contatto, dato ciò che sappiamo>",\n'
+        '     "bozza_messaggio": "<max 300 caratteri, personalizzato sui dati triangolati>"\n'
+        "  },\n"
+        '  "bandierine": ["<eventuali segnali di attenzione, o vuoto>"]\n'
+        "}"
+    )
+
+    payload = {
+        "model": CLAUDE_MODEL,
+        "max_tokens": 1500,
+        "messages": [{"role": "user", "content": clean_text(prompt)}],
+    }
+    risposta = _chiama_api("triangola_profilo", payload)
+    testo = risposta.content[0].text.strip()
+    if testo.startswith("```"):
+        testo = testo.split("```")[1]
+        if testo.startswith("json"):
+            testo = testo[4:]
+    return json.loads(testo)

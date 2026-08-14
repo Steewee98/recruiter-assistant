@@ -195,6 +195,39 @@ def aggiorna_note(candidato_id):
     return jsonify({"successo": True})
 
 
+@pipeline_bp.route("/pipeline/triangola/<int:candidato_id>", methods=["POST"])
+def triangola_candidato(candidato_id):
+    """
+    Triangola un contatto: incrocia LinkedIn + OCF + riconoscimenti e restituisce
+    un dossier ("ci piace più di LinkedIn?" + "come contattarlo?").
+    Vedi services/triangolazione.py e docs/piano_multifonte.md.
+    """
+    db = get_db()
+    row = db.execute("SELECT * FROM candidati WHERE id = ?", (candidato_id,)).fetchone()
+    db.close()
+    if not row:
+        return jsonify({"errore": "Candidato non trovato"}), 404
+
+    from services.triangolazione import triangola
+    esito = triangola(dict(row))
+    if not esito.get("ok"):
+        return jsonify({"errore": esito.get("errore", "Triangolazione non riuscita")}), 502
+
+    # Persisti il dossier per non doverlo ricalcolare (risparmio API)
+    try:
+        db = get_db()
+        db.execute(
+            "UPDATE candidati SET triangolazione = ?, data_triangolazione = CURRENT_TIMESTAMP WHERE id = ?",
+            (json.dumps(esito, ensure_ascii=False), candidato_id),
+        )
+        db.commit()
+        db.close()
+    except Exception:
+        pass  # il salvataggio è best-effort: il dossier è comunque restituito al client
+
+    return jsonify(esito)
+
+
 @pipeline_bp.route("/pipeline/elimina/<int:candidato_id>", methods=["DELETE"])
 def elimina_candidato(candidato_id):
     """Elimina un candidato dalla pipeline."""

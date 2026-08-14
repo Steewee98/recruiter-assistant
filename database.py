@@ -324,6 +324,20 @@ def init_db():
         # Città di provenienza: filtro geografico bloccante per profilo
         "ALTER TABLE impostazioni_profilo ADD COLUMN IF NOT EXISTS citta TEXT DEFAULT ''",
 
+        # ── Multi-fonte (piano docs/piano_multifonte.md §3) ────────────────────
+        # url_fonte generico: il LinkedIn URL diventa un caso particolare di questo
+        "ALTER TABLE candidati         ADD COLUMN IF NOT EXISTS url_fonte TEXT DEFAULT ''",
+        # source già esiste su candidati; garantiamo il default 'linkedin' sui vecchi record
+        "ALTER TABLE candidati         ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'linkedin'",
+        "UPDATE candidati SET source = 'linkedin' WHERE source IS NULL OR source = ''",
+        # fonti attive per profilo A/B (quali canali usare)
+        "ALTER TABLE impostazioni_profilo ADD COLUMN IF NOT EXISTS fonti_attive TEXT DEFAULT 'linkedin'",
+        # blacklist per-fonte
+        "ALTER TABLE profili_scartati  ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'linkedin'",
+        # dossier di triangolazione salvato (JSON) + data
+        "ALTER TABLE candidati         ADD COLUMN IF NOT EXISTS triangolazione TEXT",
+        "ALTER TABLE candidati         ADD COLUMN IF NOT EXISTS data_triangolazione TIMESTAMP",
+
         # Migrazione stati: Risposto e In valutazione → Contattati (stati rimossi)
         "UPDATE candidati SET stato = 'Contattati' WHERE stato IN ('Risposto', 'In valutazione')",
 
