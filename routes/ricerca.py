@@ -258,7 +258,8 @@ def _matches_citta(location: str, citta_target: str) -> bool:
 
 
 def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pagine=1,
-                ruoli_lista=None, forza_italia=True, progress_cb=None, start_page=1):
+                ruoli_lista=None, forza_italia=True, progress_cb=None, start_page=1,
+                max_items=10):
     """
     Flusso asincrono Apify in due step:
       STEP 1 — POST /acts/{actor}/runs  → avvia run, ottieni run_id
@@ -275,7 +276,7 @@ def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pag
     run_input = {
         "takePages": num_pagine,
         "startPage": max(1, start_page),   # offset: varia ad ogni ricerca
-        "maxItems": 10,                    # rinominato da maxResults nella nuova versione actor
+        "maxItems": max_items,             # rinominato da maxResults nella nuova versione actor
     }
 
     # Titoli di lavoro correnti — usa lista se fornita, altrimenti singolo ruolo
@@ -604,17 +605,19 @@ def _parametri_da_profilo(tipo_profilo: str) -> dict:
     imp = db.execute("SELECT * FROM impostazioni_profilo WHERE profilo=?", (tipo_profilo,)).fetchone()
     db.close()
     if not imp:
-        return {"ruolo": "", "citta": "", "azienda": "", "parole_chiave": ""}
+        return {"ruolo": "", "ruoli": [], "citta": "", "azienda": "", "parole_chiave": ""}
     imp = dict(imp)
 
-    def _primo(campo):
+    def _lista(campo):
         v = (imp.get(campo) or "").replace("\n", ",")
-        parti = [p.strip() for p in v.split(",") if p.strip()]
-        return parti[0] if parti else ""
+        return [p.strip() for p in v.split(",") if p.strip()]
 
+    ruoli = _lista("ruoli_target")
+    citta = _lista("citta")
     return {
-        "ruolo": _primo("ruoli_target"),
-        "citta": _primo("citta"),
+        "ruolo": ruoli[0] if ruoli else "",
+        "ruoli": ruoli,
+        "citta": citta[0] if citta else "",
         "azienda": "",
         "parole_chiave": (imp.get("keyword_positive") or "").replace("\n", " ").strip(),
     }
@@ -624,10 +627,15 @@ def _parametri_da_profilo(tipo_profilo: str) -> dict:
 def smart_cerca():
     """
     Ricerca smart (barra stile Google). Fase 1: interpreta la richiesta e restituisce
-    fino a ~20 profili pronti per essere triangolati dal client (fase 2).
+    fino a ~20 profili NUOVI pronti per essere triangolati dal client (fase 2).
 
     Body JSON: { "query": "<frase libera>", "tipo_profilo": "A"|"B" }
     Se query è vuota, usa i parametri del profilo A/B salvato.
+
+    Ruota le pagine di partenza ad ogni ricerca e accumula più pagine finché non
+    raggiunge il target di nuovi. Restituisce anche una diagnostica onesta
+    (quanti trovati, quanti già in pipeline, quanti scartati) per non dire
+    genericamente "tutti già in pipeline".
     """
     from ai_helpers import interpreta_query_ricerca
 
@@ -635,10 +643,16 @@ def smart_cerca():
     query = (dati.get("query") or "").strip()
     tipo_profilo = dati.get("tipo_profilo", "A")
     TARGET = 20
+    # L'actor Apify torna ~10 profili per run: per trovarne di nuovi bisogna
+    # esplorare più pagine (startPage diverso). Cap a 5 run per non far attendere
+    # troppo (ogni run ~10-30s) né rischiare timeout su Railway.
+    MAX_PAGINE = 5
+    MAX_ITEMS = 10
 
     # 1) Parametri: dalla frase (AI) oppure dal profilo salvato
     if query:
         params = interpreta_query_ricerca(query)
+        params["ruoli"] = [params.get("ruolo", "")] if params.get("ruolo") else []
         origine = "query"
     else:
         params = _parametri_da_profilo(tipo_profilo)
@@ -647,17 +661,29 @@ def smart_cerca():
     if not params.get("ruolo") and not params.get("parole_chiave"):
         return jsonify({"errore": "Ricerca vuota: scrivi cosa cerchi o configura il profilo di ricerca."}), 400
 
-    # 2) Ricerca Apify (fino a 3 pagine per raccogliere abbastanza profili nuovi)
+    # Rotazione: parti da una pagina diversa ad ogni ricerca smart
     db = get_db()
+    try:
+        n_prec = db.execute(
+            "SELECT COUNT(*) AS n FROM ricerche_automatiche WHERE fonte='smart'"
+        ).fetchone()["n"] or 0
+    except Exception:
+        n_prec = 0
+    start_offset = (n_prec % MAX_PAGINE) + 1
+
     profili, visti = [], set()
+    grezzi = esclusi_pipeline = esclusi_scartati = 0
     primo_errore = None
-    for start_page in range(1, 4):
+
+    for i in range(MAX_PAGINE):
         if len(profili) >= TARGET:
             break
+        start_page = ((start_offset - 1 + i) % MAX_PAGINE) + 1
         items, errore = cerca_apify(
             params.get("ruolo", ""), params.get("citta", ""), "",
             params.get("azienda", ""), params.get("parole_chiave", ""),
             num_pagine=1, start_page=start_page,
+            ruoli_lista=params.get("ruoli") or None, max_items=MAX_ITEMS,
         )
         if errore:
             primo_errore = primo_errore or errore
@@ -668,12 +694,17 @@ def smart_cerca():
             p = normalizza_profilo(item)
             chiave = (p.get("linkedin") or "").lower() or \
                      f"{p.get('nome','')}|{p.get('cognome','')}".lower()
-            if chiave in visti:
+            if not chiave.strip("|") or chiave in visti:
                 continue
             visti.add(chiave)
-            dup, _motivo, cand_id = is_duplicate(db, p)
+            grezzi += 1
+            dup, motivo, cand_id = is_duplicate(db, p)
             if dup:
-                continue  # escludi chi è già in pipeline o scartato
+                if "scart" in (motivo or "").lower():
+                    esclusi_scartati += 1
+                else:
+                    esclusi_pipeline += 1
+                continue
             profili.append({
                 "nome": p.get("nome", ""), "cognome": p.get("cognome", ""),
                 "ruolo": p.get("ruolo", ""), "azienda": p.get("azienda", ""),
@@ -682,14 +713,31 @@ def smart_cerca():
             })
             if len(profili) >= TARGET:
                 break
+
+    # Traccia la ricerca smart per far avanzare la rotazione delle pagine
+    try:
+        db.execute(
+            "INSERT INTO ricerche_automatiche (tipo_profilo, parametri, profili_trovati, fonte, stato) "
+            "VALUES (?, ?, ?, 'smart', 'completata')",
+            (tipo_profilo, json.dumps(params, ensure_ascii=False)[:500], len(profili)),
+        )
+        db.commit()
+    except Exception:
+        pass
     db.close()
 
     if not profili and primo_errore:
         return jsonify({"errore": messaggio_errore_ai(Exception(primo_errore))
                         if "api" in primo_errore.lower() else primo_errore}), 502
 
-    return jsonify({"ok": True, "origine": origine, "parametri": params,
-                    "profili": profili, "totale": len(profili)})
+    return jsonify({
+        "ok": True, "origine": origine, "parametri": params,
+        "profili": profili, "totale": len(profili),
+        "diagnostica": {
+            "trovati": grezzi, "gia_in_pipeline": esclusi_pipeline,
+            "scartati": esclusi_scartati, "nuovi": len(profili),
+        },
+    })
 
 
 @ricerca_bp.route("/ricerca/smart/dossier", methods=["POST"])

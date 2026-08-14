@@ -390,12 +390,18 @@ async function smartCerca() {
             return;
         }
         var profili = data.profili || [];
+        var dg = data.diagnostica || {};
+        var dettaglio = 'Esaminati ' + (dg.trovati || 0) + ' profili · '
+            + (dg.gia_in_pipeline || 0) + ' già in pipeline · '
+            + (dg.scartati || 0) + ' scartati in precedenza · '
+            + (dg.nuovi || 0) + ' nuovi.';
         if (!profili.length) {
-            stato.textContent = 'Nessun nuovo profilo trovato (esclusi quelli già in pipeline). Prova a riformulare.';
+            stato.innerHTML = dettaglio + '<br>Nessun profilo <b>nuovo</b> su questa ricerca. '
+                + 'Prova a cambiare ruolo/città nella barra, o riprova (esploro pagine diverse ogni volta).';
             return;
         }
         var origine = data.origine === 'profilo' ? 'profilo ' + _tipoSmart() : 'la tua richiesta';
-        stato.textContent = 'Trovati ' + profili.length + ' profili in linea con ' + origine + '. Triangolo tutti…';
+        stato.textContent = dettaglio + ' Triangolo i ' + profili.length + ' nuovi…';
         // Crea le card skeleton
         profili.forEach(function(p, i) {
             var el = document.createElement('div');
