@@ -108,6 +108,63 @@ RUOLI_CORRELATI = {
     ],
 }
 
+# Città vicine (entro ~100 km) usate per allargare la ricerca smart quando la
+# città principale non produce abbastanza profili nuovi. Chiave = città normalizzata
+# in italiano minuscolo. I valori vengono poi passati a _normalizza_citta().
+_CITTA_VICINE = {
+    'roma':    ['Latina', 'Frosinone', 'Viterbo', 'Rieti', 'Terni', 'Guidonia'],
+    'milano':  ['Monza', 'Bergamo', 'Brescia', 'Como', 'Pavia', 'Varese', 'Lodi', 'Novara'],
+    'torino':  ['Asti', 'Alessandria', 'Cuneo', 'Novara', 'Vercelli', 'Biella'],
+    'napoli':  ['Caserta', 'Salerno', 'Avellino', 'Benevento', 'Pozzuoli'],
+    'firenze': ['Prato', 'Pistoia', 'Empoli', 'Arezzo', 'Siena', 'Lucca', 'Pisa'],
+    'bologna': ['Modena', 'Ferrara', 'Ravenna', 'Reggio Emilia', "Forlì", 'Imola'],
+    'venezia': ['Padova', 'Treviso', 'Vicenza', 'Mestre', 'Rovigo'],
+    'padova':  ['Venezia', 'Vicenza', 'Treviso', 'Rovigo', 'Verona'],
+    'verona':  ['Vicenza', 'Padova', 'Mantova', 'Brescia', 'Trento'],
+    'genova':  ['Savona', 'La Spezia', 'Alessandria', 'Rapallo'],
+    'bari':    ['Barletta', 'Andria', 'Trani', 'Bitonto', 'Molfetta', 'Altamura'],
+    'palermo': ['Trapani', 'Agrigento', 'Caltanissetta', 'Monreale', "Cefalù"],
+    'catania': ['Siracusa', 'Ragusa', 'Enna', 'Caltagirone', 'Acireale'],
+}
+
+
+def _espandi_ruoli(ruolo: str, extra: list = None) -> list:
+    """
+    Restituisce la lista di ruoli affini a `ruolo`, combinando:
+    - il dizionario statico RUOLI_CORRELATI (affidabile, gratis)
+    - eventuali ruoli suggeriti dall'AI (`extra`, es. da interpreta_query_ricerca)
+    Non include il ruolo principale. Dedup case-insensitive, ordine preservato.
+    """
+    correlati = list(RUOLI_CORRELATI.get((ruolo or "").lower().strip(), []))
+    for r in (extra or []):
+        if r and r.lower().strip() not in [c.lower().strip() for c in correlati]:
+            correlati.append(r)
+    base = (ruolo or "").lower().strip()
+    return [r for r in correlati if r.lower().strip() != base]
+
+
+def _espandi_citta(citta: str, extra: list = None) -> list:
+    """
+    Restituisce la lista di città vicine (entro ~100km) a `citta`, combinando
+    il dizionario statico _CITTA_VICINE con eventuali suggerimenti AI (`extra`).
+    Non include la città principale. Dedup case-insensitive, ordine preservato.
+    """
+    if not citta:
+        return []
+    key = citta.lower().strip().split(',')[0].strip()
+    # Risolvi le varianti IT/EN ("rome"→"roma") sfruttando i gruppi alias noti
+    if key not in _CITTA_VICINE:
+        for alias in _citta_aliases(key):
+            if alias in _CITTA_VICINE:
+                key = alias
+                break
+    vicine = list(_CITTA_VICINE.get(key, []))
+    for c in (extra or []):
+        if c and c.lower().strip() not in [v.lower().strip() for v in vicine]:
+            vicine.append(c)
+    return [c for c in vicine if c.lower().strip() != key]
+
+
 # Keywords generiche per FASE 3 (fallback quando ruolo + correlati non bastano)
 _KW_GENERICHE_FALLBACK = [
     'banca consulenza finanziaria',
@@ -661,6 +718,19 @@ def smart_cerca():
     if not params.get("ruolo") and not params.get("parole_chiave"):
         return jsonify({"errore": "Ricerca vuota: scrivi cosa cerchi o configura il profilo di ricerca."}), 400
 
+    # ── Allargamento ricerca: ruoli affini + città vicine ─────────────────────
+    # Combina i dizionari statici (affidabili, gratis) con i suggerimenti dell'AI
+    # dalla query. Così se "consulente finanziario" non basta, provo anche
+    # "consulente patrimoniale" ecc.; se "Roma" non basta, provo Latina/Frosinone…
+    ruolo_princ = params.get("ruolo", "")
+    citta_princ = params.get("citta", "")
+    azienda     = params.get("azienda", "")
+    kw          = params.get("parole_chiave", "")
+    ruoli_lista = params.get("ruoli") or None
+
+    ruoli_correlati = _espandi_ruoli(ruolo_princ, params.get("ruoli_correlati"))
+    citta_vicine    = _espandi_citta(citta_princ, params.get("citta_vicine"))
+
     # Rotazione: parti da una pagina diversa ad ogni ricerca smart
     db = get_db()
     try:
@@ -674,20 +744,13 @@ def smart_cerca():
     profili, visti = [], set()
     grezzi = esclusi_pipeline = esclusi_scartati = 0
     primo_errore = None
+    ruoli_extra_usati = []   # ruoli affini che hanno prodotto profili nuovi
+    citta_extra_usate = []   # città vicine che hanno prodotto profili nuovi
 
-    for i in range(MAX_PAGINE):
-        if len(profili) >= TARGET:
-            break
-        start_page = ((start_offset - 1 + i) % MAX_PAGINE) + 1
-        items, errore = cerca_apify(
-            params.get("ruolo", ""), params.get("citta", ""), "",
-            params.get("azienda", ""), params.get("parole_chiave", ""),
-            num_pagine=1, start_page=start_page,
-            ruoli_lista=params.get("ruoli") or None, max_items=MAX_ITEMS,
-        )
-        if errore:
-            primo_errore = primo_errore or errore
-            continue
+    def _raccogli(items, ruolo_via, citta_via):
+        """Processa i profili grezzi di una run Apify. Ritorna quanti nuovi aggiunti."""
+        nonlocal grezzi, esclusi_pipeline, esclusi_scartati
+        aggiunti = 0
         for item in items or []:
             if not isinstance(item, dict):
                 continue
@@ -710,9 +773,48 @@ def smart_cerca():
                 "ruolo": p.get("ruolo", ""), "azienda": p.get("azienda", ""),
                 "location": p.get("location", ""), "linkedin": p.get("linkedin", ""),
                 "sommario": p.get("sommario", ""),
+                "via_ruolo": ruolo_via or "", "via_citta": citta_via or "",
             })
+            aggiunti += 1
             if len(profili) >= TARGET:
                 break
+        return aggiunti
+
+    # Piani di ricerca in ordine di priorità:
+    #   1) ruolo + città principale su più pagine (rotazione)
+    #   2) ruoli affini sulla città principale
+    #   3) ruolo principale sulle città vicine (entro ~100km)
+    combos = []
+    for i in range(MAX_PAGINE):
+        sp = ((start_offset - 1 + i) % MAX_PAGINE) + 1
+        combos.append({"ruolo": ruolo_princ, "citta": citta_princ, "sp": sp, "tag": "principale"})
+    for rc in ruoli_correlati:
+        combos.append({"ruolo": rc, "citta": citta_princ, "sp": 1, "tag": "ruolo_simile"})
+    ruolo_per_vicine = ruolo_princ or (ruoli_correlati[0] if ruoli_correlati else "")
+    for cv in citta_vicine:
+        combos.append({"ruolo": ruolo_per_vicine, "citta": cv, "sp": 1, "tag": "citta_vicina"})
+
+    MAX_RUNS = 8   # tetto alle chiamate Apify per non far attendere troppo l'utente
+    run_fatti = 0
+    for c in combos:
+        if len(profili) >= TARGET or run_fatti >= MAX_RUNS:
+            break
+        run_fatti += 1
+        items, errore = cerca_apify(
+            c["ruolo"], c["citta"], "", azienda, kw,
+            num_pagine=1, start_page=c["sp"],
+            ruoli_lista=(ruoli_lista if c["tag"] == "principale" else None),
+            max_items=MAX_ITEMS,
+        )
+        if errore:
+            primo_errore = primo_errore or errore
+            continue
+        aggiunti = _raccogli(items, c["ruolo"], c["citta"])
+        if aggiunti > 0:
+            if c["tag"] == "ruolo_simile" and c["ruolo"] not in ruoli_extra_usati:
+                ruoli_extra_usati.append(c["ruolo"])
+            if c["tag"] == "citta_vicina" and c["citta"] not in citta_extra_usate:
+                citta_extra_usate.append(c["citta"])
 
     # Traccia la ricerca smart per far avanzare la rotazione delle pagine
     try:
@@ -736,6 +838,10 @@ def smart_cerca():
         "diagnostica": {
             "trovati": grezzi, "gia_in_pipeline": esclusi_pipeline,
             "scartati": esclusi_scartati, "nuovi": len(profili),
+            "ruoli_simili": ruoli_extra_usati,
+            "citta_vicine": citta_extra_usate,
+            "ruoli_simili_disponibili": ruoli_correlati,
+            "citta_vicine_disponibili": citta_vicine,
         },
     })
 
