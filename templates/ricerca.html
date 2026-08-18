@@ -378,9 +378,14 @@ async function smartCerca() {
     stato.textContent = 'Cerco i profili in linea…';
     document.getElementById('smart-btn-testo').classList.add('hidden');
     mostra('smart-btn-loading');
+    // Timeout esplicito lato client (200s): sotto il timeout gunicorn (240s),
+    // così se il server è lento diamo un messaggio chiaro invece di un crash di rete.
+    var _ctrl = new AbortController();
+    var _tid = setTimeout(function(){ _ctrl.abort(); }, 225000);
     try {
         var resp = await fetch('/ricerca/smart/cerca', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
+            signal: _ctrl.signal,
             body: JSON.stringify({ query: query, tipo_profilo: _tipoSmart() })
         });
         var data = await resp.json();
@@ -403,6 +408,8 @@ async function smartCerca() {
             allarg.push('città vicine: ' + dg.citta_vicine.join(', '));
         if (allarg.length)
             dettaglio += '<br><span style="color:var(--azzurro,#2E7CF6);">↔ Ricerca allargata a ' + _escapeHtml(allarg.join(' · ')) + '</span>';
+        if (dg.troncata_per_tempo)
+            dettaglio += '<br><span style="color:#b45309;">⏱ Ricerca interrotta per non superare i tempi — rilanciala per continuare da dove ho lasciato.</span>';
         if (!profili.length) {
             var suggeriti = [];
             if ((dg.ruoli_simili_disponibili || []).length)
@@ -439,9 +446,12 @@ async function smartCerca() {
         });
         stato.textContent = 'Fatto: ' + profili.length + ' dossier triangolati.';
     } catch (e) {
-        errore.textContent = 'Errore di rete durante la ricerca.';
+        errore.textContent = (e && e.name === 'AbortError')
+            ? 'La ricerca ha impiegato troppo tempo. Riprova: ogni volta esploro pagine e criteri diversi.'
+            : 'Errore di rete durante la ricerca. Riprova tra qualche istante.';
         mostra('smart-errore'); nascondi('smart-stato');
     } finally {
+        clearTimeout(_tid);
         document.getElementById('smart-btn-testo').classList.remove('hidden');
         nascondi('smart-btn-loading');
     }

@@ -316,7 +316,7 @@ def _matches_citta(location: str, citta_target: str) -> bool:
 
 def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pagine=1,
                 ruoli_lista=None, forza_italia=True, progress_cb=None, start_page=1,
-                max_items=10):
+                max_items=10, max_wait=180):
     """
     Flusso asincrono Apify in due step:
       STEP 1 — POST /acts/{actor}/runs  → avvia run, ottieni run_id
@@ -391,7 +391,8 @@ def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pag
     if progress_cb:
         progress_cb(20, "Ricerca in corso su LinkedIn")
 
-    max_wait      = 180   # 3 minuti
+    # max_wait è ora un parametro: la ricerca smart lo abbassa per non sforare
+    # il timeout gunicorn (240s) quando concatena più run consecutive.
     poll_interval = 5
     elapsed       = 0
 
@@ -794,17 +795,27 @@ def smart_cerca():
     for cv in citta_vicine:
         combos.append({"ruolo": ruolo_per_vicine, "citta": cv, "sp": 1, "tag": "citta_vicina"})
 
-    MAX_RUNS = 8   # tetto alle chiamate Apify per non far attendere troppo l'utente
+    MAX_RUNS = 8       # tetto alle chiamate Apify per non far attendere troppo l'utente
+    BUDGET_S = 165     # budget wall-clock; +~30s fetch finale resta sotto gunicorn (240s)
+    PER_RUN_S = 55     # attesa massima per singola run Apify in modalità smart
+    t0 = time.monotonic()
     run_fatti = 0
+    troncata_per_tempo = False
     for c in combos:
         if len(profili) >= TARGET or run_fatti >= MAX_RUNS:
+            break
+        # Budget di tempo: se resta poco margine, fermati invece di rischiare il timeout
+        restante = BUDGET_S - (time.monotonic() - t0)
+        if restante < 20:
+            troncata_per_tempo = True
+            log.info("smart_cerca: budget tempo esaurito dopo %d run", run_fatti)
             break
         run_fatti += 1
         items, errore = cerca_apify(
             c["ruolo"], c["citta"], "", azienda, kw,
             num_pagine=1, start_page=c["sp"],
             ruoli_lista=(ruoli_lista if c["tag"] == "principale" else None),
-            max_items=MAX_ITEMS,
+            max_items=MAX_ITEMS, max_wait=int(min(PER_RUN_S, restante)),
         )
         if errore:
             primo_errore = primo_errore or errore
@@ -842,6 +853,7 @@ def smart_cerca():
             "citta_vicine": citta_extra_usate,
             "ruoli_simili_disponibili": ruoli_correlati,
             "citta_vicine_disponibili": citta_vicine,
+            "troncata_per_tempo": troncata_per_tempo,
         },
     })
 
