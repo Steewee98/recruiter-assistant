@@ -395,8 +395,22 @@ async function smartCerca() {
             + (dg.gia_in_pipeline || 0) + ' già in pipeline · '
             + (dg.scartati || 0) + ' scartati in precedenza · '
             + (dg.nuovi || 0) + ' nuovi.';
+        // Mostra gli allargamenti effettivamente usati (ruoli affini + città vicine)
+        var allarg = [];
+        if ((dg.ruoli_simili || []).length)
+            allarg.push('ruoli simili: ' + dg.ruoli_simili.join(', '));
+        if ((dg.citta_vicine || []).length)
+            allarg.push('città vicine: ' + dg.citta_vicine.join(', '));
+        if (allarg.length)
+            dettaglio += '<br><span style="color:var(--azzurro,#2E7CF6);">↔ Ricerca allargata a ' + _escapeHtml(allarg.join(' · ')) + '</span>';
         if (!profili.length) {
-            stato.innerHTML = dettaglio + '<br>Nessun profilo <b>nuovo</b> su questa ricerca. '
+            var suggeriti = [];
+            if ((dg.ruoli_simili_disponibili || []).length)
+                suggeriti.push('ruoli: ' + dg.ruoli_simili_disponibili.slice(0,4).join(', '));
+            if ((dg.citta_vicine_disponibili || []).length)
+                suggeriti.push('città vicine: ' + dg.citta_vicine_disponibili.slice(0,4).join(', '));
+            stato.innerHTML = dettaglio + '<br>Nessun profilo <b>nuovo</b>, nemmeno allargando la ricerca. '
+                + (suggeriti.length ? 'Ho già provato anche ' + _escapeHtml(suggeriti.join(' · ')) + '. ' : '')
                 + 'Prova a cambiare ruolo/città nella barra, o riprova (esploro pagine diverse ogni volta).';
             return;
         }

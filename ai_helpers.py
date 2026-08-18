@@ -739,7 +739,8 @@ def interpreta_query_ricerca(query: str) -> dict:
     In caso di errore AI fa un fallback euristico mettendo l'intera query come ruolo.
     """
     query = clean_text(query or "").strip()
-    fallback = {"ruolo": query, "citta": "", "azienda": "", "parole_chiave": ""}
+    fallback = {"ruolo": query, "citta": "", "azienda": "", "parole_chiave": "",
+                "ruoli_correlati": [], "citta_vicine": []}
     if not query:
         return fallback
 
@@ -747,19 +748,41 @@ def interpreta_query_ricerca(query: str) -> dict:
         "Sei un assistente che trasforma una richiesta di ricerca candidati nel settore\n"
         "bancario/consulenza finanziaria in parametri strutturati per un motore di ricerca profili.\n\n"
         f"RICHIESTA: {query}\n\n"
-        "Estrai i parametri e rispondi ESCLUSIVAMENTE con questo JSON valido:\n"
+        "Oltre ai parametri principali, proponi anche ALLARGAMENTI della ricerca:\n"
+        "- ruoli_correlati: figure professionali affini/equivalenti a quella principale\n"
+        "  (es. 'consulente finanziario' → 'consulente patrimoniale', 'private banker',\n"
+        "  'promotore finanziario', 'wealth manager'). Da 3 a 6 titoli, dal più vicino al più lontano.\n"
+        "- citta_vicine: città entro ~100 km da quella indicata (es. 'Roma' → 'Latina',\n"
+        "  'Frosinone', 'Viterbo', 'Rieti'). Da 3 a 6 città. Vuoto se non è indicata alcuna città.\n\n"
+        "Rispondi ESCLUSIVAMENTE con questo JSON valido:\n"
         "{\n"
         '  "ruolo": "<il ruolo/figura principale, es. Private Banker>",\n'
         '  "citta": "<città o area, vuoto se non indicata>",\n'
         '  "azienda": "<azienda/rete specifica, vuoto se non indicata>",\n'
-        '  "parole_chiave": "<altre keyword rilevanti separate da spazio, vuoto se nessuna>"\n'
+        '  "parole_chiave": "<altre keyword rilevanti separate da spazio, vuoto se nessuna>",\n'
+        '  "ruoli_correlati": ["<ruolo affine>", "..."],\n'
+        '  "citta_vicine": ["<città entro ~100km>", "..."]\n'
         "}"
     )
     payload = {
         "model": CLAUDE_MODEL,
-        "max_tokens": 300,
+        "max_tokens": 500,
         "messages": [{"role": "user", "content": prompt}],
     }
+
+    def _lista(val):
+        """Normalizza il campo in lista di stringhe pulite (max 6)."""
+        if isinstance(val, str):
+            val = [v for v in val.split(",")]
+        if not isinstance(val, list):
+            return []
+        out = []
+        for v in val:
+            s = str(v or "").strip()
+            if s:
+                out.append(s)
+        return out[:6]
+
     try:
         risposta = _chiama_api("interpreta_query_ricerca", payload)
         testo = risposta.content[0].text.strip()
@@ -773,6 +796,8 @@ def interpreta_query_ricerca(query: str) -> dict:
             "citta": (d.get("citta") or "").strip(),
             "azienda": (d.get("azienda") or "").strip(),
             "parole_chiave": (d.get("parole_chiave") or "").strip(),
+            "ruoli_correlati": _lista(d.get("ruoli_correlati")),
+            "citta_vicine": _lista(d.get("citta_vicine")),
         }
     except Exception as e:
         logger.warning("[AI] interpreta_query_ricerca fallita, uso fallback: %s", e)
