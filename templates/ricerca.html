@@ -399,6 +399,7 @@ async function smartCerca() {
         var dettaglio = 'Esaminati ' + (dg.trovati || 0) + ' profili · '
             + (dg.gia_in_pipeline || 0) + ' già in pipeline · '
             + (dg.scartati || 0) + ' scartati in precedenza · '
+            + ((dg.non_pertinenti || 0) ? (dg.non_pertinenti + ' fuori target · ') : '')
             + (dg.nuovi || 0) + ' nuovi.';
         // Mostra gli allargamenti effettivamente usati (ruoli affini + città vicine)
         var allarg = [];

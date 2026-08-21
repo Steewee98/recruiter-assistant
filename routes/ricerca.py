@@ -186,6 +186,79 @@ _RETI_FINANZIARIE = [
 ]
 
 
+# ── Filtro di pertinenza (dominio: private banking / consulenza finanziaria) ──
+# Termini che qualificano un profilo come "in target" (ruolo/headline/sommario).
+_RUOLI_FINANZ_POS = {
+    'consulente finanziario', 'consulenza finanziaria', 'consulente patrimoniale',
+    'private banker', 'private banking', 'wealth manager', 'wealth management',
+    'promotore finanziario', 'financial advisor', 'financial planner', 'financial planning',
+    'gestore patrimoni', 'gestione patrimoni', 'gestore patrimoniale', 'asset manager',
+    'investment advisor', 'relationship manager', 'family banker', 'banker',
+    'consulente investimenti', 'consulente del credito', 'personal financial',
+}
+
+# Termini che indicano professioni NON target: se presenti e senza un forte segnale
+# finanziario, il profilo viene scartato (es. commercialisti, revisori, geometri…).
+_RUOLI_NON_TARGET = {
+    'commercialista', 'revisore contabile', 'revisore legale', 'ragioniere',
+    'geometra', 'avvocato', 'notaio', 'architetto', 'ingegnere', 'medico',
+    'accounting', 'accountant', 'bookkeeper', 'loss adjuster', 'patronato',
+    'consulente del lavoro', 'agente immobiliare', 'perito', 'studio legale',
+    'studio tecnico', 'chartered account', 'tax advisor', 'buste paga',
+}
+
+
+def _profilo_rilevante(p: dict, termini_target: set) -> bool:
+    """
+    True se il profilo è plausibilmente in target (consulenza finanziaria/private banking).
+    - Se contiene un termine target (ruolo cercato, affini o segnali finanziari) → tieni.
+    - Altrimenti, se contiene una professione chiaramente NON target → scarta.
+    - Nel dubbio (nessun segnale) → tieni: Apify ha già filtrato per ruolo/keyword.
+    """
+    testo = " ".join([
+        str(p.get('ruolo', '') or ''),
+        str(p.get('sommario', '') or ''),
+        str(p.get('azienda', '') or ''),
+    ]).lower()
+    if any(t in testo for t in termini_target if t):
+        return True
+    if any(n in testo for n in _RUOLI_NON_TARGET):
+        return False
+    return True
+
+
+def _split_ruolo_citta(frase: str) -> tuple:
+    """
+    Estrae (ruolo, citta) da una frase libera quando l'AI non è disponibile
+    (es. credito esaurito). Riconosce pattern "<ruolo> a/in/di/presso <città>"
+    e la città in coda, usando le città note. Se non trova città, ritorna (frase, "").
+    """
+    f = (frase or "").strip()
+    if not f:
+        return f, ""
+    low = f.lower()
+
+    citta_note = set(_CITTA_NORMALIZE.keys()) | set(_CITTA_VICINE.keys())
+    for g in _CITTA_GRUPPI_ALIAS:
+        citta_note |= g
+    for vs in _CITTA_VICINE.values():
+        for v in vs:
+            citta_note.add(v.lower())
+
+    for sep in (" a ", " in ", " di ", " su ", " presso ", " zona "):
+        if sep in low:
+            testa, coda = low.rsplit(sep, 1)
+            coda_c = coda.strip().strip(".,;:")
+            if coda_c in citta_note:
+                return f[:len(testa)].strip(), coda_c
+
+    parole = low.split()
+    if parole and parole[-1].strip(".,;:") in citta_note:
+        citta = parole[-1].strip(".,;:")
+        return f[:f.lower().rfind(citta)].strip(), citta
+    return f, ""
+
+
 # Keywords generiche per FASE 3 (fallback quando ruolo + correlati non bastano)
 _KW_GENERICHE_FALLBACK = [
     'banca consulenza finanziaria',
@@ -731,6 +804,14 @@ def smart_cerca():
     # 1) Parametri: dalla frase (AI) oppure dal profilo salvato
     if query:
         params = interpreta_query_ricerca(query)
+        # Robustezza: se l'AI non ha estratto la città (o è in fallback perché il
+        # credito Anthropic è esaurito), la ricavo io dalla frase ("… a Roma").
+        # Senza questo, l'intera frase finisce come "ruolo" e LinkedIn torna rumore.
+        if not params.get("citta"):
+            ruolo_h, citta_h = _split_ruolo_citta(params.get("ruolo", "") or query)
+            if citta_h:
+                params["ruolo"] = ruolo_h
+                params["citta"] = citta_h
         params["ruoli"] = [params.get("ruolo", "")] if params.get("ruolo") else []
         origine = "query"
     else:
@@ -753,6 +834,12 @@ def smart_cerca():
     ruoli_correlati = _espandi_ruoli(ruolo_princ, params.get("ruoli_correlati"))
     citta_vicine    = _espandi_citta(citta_princ, params.get("citta_vicine"))
 
+    # Termini per il filtro di pertinenza: ruolo cercato + affini + segnali finanziari.
+    termini_target = {ruolo_princ.lower().strip()} if ruolo_princ else set()
+    termini_target |= {r.lower().strip() for r in ruoli_correlati}
+    termini_target |= _RUOLI_FINANZ_POS
+    termini_target.discard("")
+
     # Rotazione: parti da una pagina diversa ad ogni ricerca smart
     db = get_db()
     try:
@@ -768,7 +855,7 @@ def smart_cerca():
     reti_espansione = [] if azienda else list(_RETI_FINANZIARIE)
 
     profili, visti = [], set()
-    grezzi = esclusi_pipeline = esclusi_scartati = 0
+    grezzi = esclusi_pipeline = esclusi_scartati = esclusi_irrilevanti = 0
     primo_errore = None
     ruoli_extra_usati = []   # ruoli affini che hanno prodotto profili nuovi
     citta_extra_usate = []   # città vicine che hanno prodotto profili nuovi
@@ -776,7 +863,7 @@ def smart_cerca():
 
     def _raccogli(items, ruolo_via, citta_via):
         """Processa i profili grezzi di una run Apify. Ritorna quanti nuovi aggiunti."""
-        nonlocal grezzi, esclusi_pipeline, esclusi_scartati
+        nonlocal grezzi, esclusi_pipeline, esclusi_scartati, esclusi_irrilevanti
         aggiunti = 0
         for item in items or []:
             if not isinstance(item, dict):
@@ -788,6 +875,10 @@ def smart_cerca():
                 continue
             visti.add(chiave)
             grezzi += 1
+            # Filtro pertinenza: scarta chi non è del dominio (commercialisti, ecc.)
+            if not _profilo_rilevante(p, termini_target):
+                esclusi_irrilevanti += 1
+                continue
             dup, motivo, cand_id = is_duplicate(db, p)
             if dup:
                 if "scart" in (motivo or "").lower():
@@ -902,7 +993,8 @@ def smart_cerca():
         "profili": profili, "totale": len(profili),
         "diagnostica": {
             "trovati": grezzi, "gia_in_pipeline": esclusi_pipeline,
-            "scartati": esclusi_scartati, "nuovi": len(profili),
+            "scartati": esclusi_scartati, "non_pertinenti": esclusi_irrilevanti,
+            "nuovi": len(profili),
             "ruoli_simili": ruoli_extra_usati,
             "citta_vicine": citta_extra_usate,
             "reti": reti_extra_usate,
