@@ -404,6 +404,8 @@ async function smartCerca() {
         var allarg = [];
         if ((dg.ruoli_simili || []).length)
             allarg.push('ruoli simili: ' + dg.ruoli_simili.join(', '));
+        if ((dg.reti || []).length)
+            allarg.push('reti concorrenti: ' + dg.reti.join(', '));
         if ((dg.citta_vicine || []).length)
             allarg.push('città vicine: ' + dg.citta_vicine.join(', '));
         if (allarg.length)
@@ -414,6 +416,8 @@ async function smartCerca() {
             var suggeriti = [];
             if ((dg.ruoli_simili_disponibili || []).length)
                 suggeriti.push('ruoli: ' + dg.ruoli_simili_disponibili.slice(0,4).join(', '));
+            if ((dg.reti_disponibili || []).length)
+                suggeriti.push('reti: ' + dg.reti_disponibili.slice(0,4).join(', '));
             if ((dg.citta_vicine_disponibili || []).length)
                 suggeriti.push('città vicine: ' + dg.citta_vicine_disponibili.slice(0,4).join(', '));
             stato.innerHTML = dettaglio + '<br>Nessun profilo <b>nuovo</b>, nemmeno allargando la ricerca. '

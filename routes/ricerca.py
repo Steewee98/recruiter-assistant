@@ -165,6 +165,27 @@ def _espandi_citta(citta: str, extra: list = None) -> list:
     return [c for c in vicine if c.lower().strip() != key]
 
 
+# Reti / banche di consulenza finanziaria italiane — usate come asse di allargamento
+# della ricerca smart: per il ruolo cercato si interrogano i profili che lavorano
+# presso questi gruppi (via currentCompanies di Apify). È l'asse più fruttuoso per il
+# recruiting nel private banking IT. NB: Fideuram è escluso di proposito (il tool serve
+# a trovare consulenti da reclutare DALLE reti concorrenti).
+_RETI_FINANZIARIE = [
+    "Banca Mediolanum",
+    "FinecoBank",
+    "Banca Generali",
+    "Azimut",
+    "Allianz Bank Financial Advisors",
+    "Zurich Bank",                 # ex Deutsche Bank Financial Advisors
+    "Banca Widiba",
+    "Sanpaolo Invest",
+    "BNL BNP Paribas Life Banker",
+    "Credem Euromobiliare Private Banking",
+    "Banca Patrimoni Sella & C.",
+    "IW Private Investments",
+]
+
+
 # Keywords generiche per FASE 3 (fallback quando ruolo + correlati non bastano)
 _KW_GENERICHE_FALLBACK = [
     'banca consulenza finanziaria',
@@ -742,11 +763,16 @@ def smart_cerca():
         n_prec = 0
     start_offset = (n_prec % MAX_PAGINE) + 1
 
+    # Reti concorrenti come asse di allargamento — solo se l'utente non ha già
+    # chiesto un'azienda specifica (in quel caso rispettiamo la sua scelta).
+    reti_espansione = [] if azienda else list(_RETI_FINANZIARIE)
+
     profili, visti = [], set()
     grezzi = esclusi_pipeline = esclusi_scartati = 0
     primo_errore = None
     ruoli_extra_usati = []   # ruoli affini che hanno prodotto profili nuovi
     citta_extra_usate = []   # città vicine che hanno prodotto profili nuovi
+    reti_extra_usate  = []   # reti concorrenti che hanno prodotto profili nuovi
 
     def _raccogli(items, ruolo_via, citta_via):
         """Processa i profili grezzi di una run Apify. Ritorna quanti nuovi aggiunti."""
@@ -781,19 +807,42 @@ def smart_cerca():
                 break
         return aggiunti
 
-    # Piani di ricerca in ordine di priorità:
-    #   1) ruolo + città principale su più pagine (rotazione)
-    #   2) ruoli affini sulla città principale
-    #   3) ruolo principale sulle città vicine (entro ~100km)
-    combos = []
-    for i in range(MAX_PAGINE):
-        sp = ((start_offset - 1 + i) % MAX_PAGINE) + 1
-        combos.append({"ruolo": ruolo_princ, "citta": citta_princ, "sp": sp, "tag": "principale"})
-    for rc in ruoli_correlati:
-        combos.append({"ruolo": rc, "citta": citta_princ, "sp": 1, "tag": "ruolo_simile"})
+    # Assi di ricerca (ognuno una lista di combo). Vengono poi INTERLEAVATI così che,
+    # entro il tetto di run/budget, si copra un po' di ciascun asse invece di esaurire
+    # tutte le pagine del solo ruolo principale (che è proprio il caso in cui "sembra
+    # che il segmento sia finito"):
+    #   1) ruolo + città principale su più pagine (fonte primaria)
+    #   2) ruoli affini (seniority/sinonimi IT-EN) sulla città principale
+    #   3) reti/banche concorrenti (ruolo principale @ rete)
+    #   4) ruolo principale sulle città vicine (entro ~100km)
     ruolo_per_vicine = ruolo_princ or (ruoli_correlati[0] if ruoli_correlati else "")
-    for cv in citta_vicine:
-        combos.append({"ruolo": ruolo_per_vicine, "citta": cv, "sp": 1, "tag": "citta_vicina"})
+    ax_princ = [
+        {"ruolo": ruolo_princ, "citta": citta_princ, "azienda": "", "sp": ((start_offset - 1 + i) % MAX_PAGINE) + 1, "tag": "principale"}
+        for i in range(MAX_PAGINE)
+    ]
+    ax_ruoli = [
+        {"ruolo": rc, "citta": citta_princ, "azienda": "", "sp": 1, "tag": "ruolo_simile"}
+        for rc in ruoli_correlati
+    ]
+    ax_reti = [
+        {"ruolo": ruolo_princ, "citta": citta_princ, "azienda": rete, "sp": 1, "tag": "rete"}
+        for rete in reti_espansione
+    ]
+    ax_vicine = [
+        {"ruolo": ruolo_per_vicine, "citta": cv, "azienda": "", "sp": 1, "tag": "citta_vicina"}
+        for cv in citta_vicine
+    ]
+
+    # Le prime 2 pagine principali hanno priorità assoluta; poi round-robin tra gli assi
+    # di allargamento (ruoli affini, reti, città vicine) e le pagine principali rimaste.
+    combos = list(ax_princ[:2])
+    code = [ax_ruoli, ax_reti, ax_vicine, ax_princ[2:]]
+    idx = 0
+    while any(idx < len(lst) for lst in code):
+        for lst in code:
+            if idx < len(lst):
+                combos.append(lst[idx])
+        idx += 1
 
     MAX_RUNS = 8       # tetto alle chiamate Apify per non far attendere troppo l'utente
     BUDGET_S = 165     # budget wall-clock; +~30s fetch finale resta sotto gunicorn (240s)
@@ -811,8 +860,11 @@ def smart_cerca():
             log.info("smart_cerca: budget tempo esaurito dopo %d run", run_fatti)
             break
         run_fatti += 1
+        # azienda per-combo: le combo "rete" usano la rete concorrente; le altre
+        # ereditano l'azienda eventualmente indicata nella query.
+        azienda_combo = c.get("azienda") or (azienda if c["tag"] != "rete" else "")
         items, errore = cerca_apify(
-            c["ruolo"], c["citta"], "", azienda, kw,
+            c["ruolo"], c["citta"], "", azienda_combo, kw,
             num_pagine=1, start_page=c["sp"],
             ruoli_lista=(ruoli_lista if c["tag"] == "principale" else None),
             max_items=MAX_ITEMS, max_wait=int(min(PER_RUN_S, restante)),
@@ -820,12 +872,14 @@ def smart_cerca():
         if errore:
             primo_errore = primo_errore or errore
             continue
-        aggiunti = _raccogli(items, c["ruolo"], c["citta"])
+        aggiunti = _raccogli(items, c["ruolo"], c["citta"] or azienda_combo)
         if aggiunti > 0:
             if c["tag"] == "ruolo_simile" and c["ruolo"] not in ruoli_extra_usati:
                 ruoli_extra_usati.append(c["ruolo"])
             if c["tag"] == "citta_vicina" and c["citta"] not in citta_extra_usate:
                 citta_extra_usate.append(c["citta"])
+            if c["tag"] == "rete" and azienda_combo not in reti_extra_usate:
+                reti_extra_usate.append(azienda_combo)
 
     # Traccia la ricerca smart per far avanzare la rotazione delle pagine
     try:
@@ -851,8 +905,10 @@ def smart_cerca():
             "scartati": esclusi_scartati, "nuovi": len(profili),
             "ruoli_simili": ruoli_extra_usati,
             "citta_vicine": citta_extra_usate,
+            "reti": reti_extra_usate,
             "ruoli_simili_disponibili": ruoli_correlati,
             "citta_vicine_disponibili": citta_vicine,
+            "reti_disponibili": reti_espansione,
             "troncata_per_tempo": troncata_per_tempo,
         },
     })
