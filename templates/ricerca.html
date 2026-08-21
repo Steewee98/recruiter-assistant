@@ -381,7 +381,7 @@ async function smartCerca() {
     // Timeout esplicito lato client (200s): sotto il timeout gunicorn (240s),
     // così se il server è lento diamo un messaggio chiaro invece di un crash di rete.
     var _ctrl = new AbortController();
-    var _tid = setTimeout(function(){ _ctrl.abort(); }, 225000);
+    var _tid = setTimeout(function(){ _ctrl.abort(); }, 260000);
     try {
         var resp = await fetch('/ricerca/smart/cerca', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
