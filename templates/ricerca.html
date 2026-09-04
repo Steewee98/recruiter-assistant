@@ -378,7 +378,8 @@ async function smartCerca() {
     stato.textContent = 'Cerco i profili in linea…';
     document.getElementById('smart-btn-testo').classList.add('hidden');
     mostra('smart-btn-loading');
-    // Timeout esplicito lato client (200s): sotto il timeout gunicorn (240s),
+    // Timeout esplicito lato client (260s): sopra il budget server (~195s: 165s di
+    // ricerca + fetch finale) e compatibile col worker gthread,
     // così se il server è lento diamo un messaggio chiaro invece di un crash di rete.
     var _ctrl = new AbortController();
     var _tid = setTimeout(function(){ _ctrl.abort(); }, 260000);
@@ -427,7 +428,11 @@ async function smartCerca() {
             return;
         }
         var origine = data.origine === 'profilo' ? 'profilo ' + _tipoSmart() : 'la tua richiesta';
-        stato.textContent = dettaglio + ' Triangolo i ' + profili.length + ' nuovi…';
+        // `dettaglio` contiene HTML (banner "ricerca allargata", avviso tempo):
+        // va scritto con innerHTML, altrimenti l'utente legge i tag a schermo.
+        // Resta visibile anche durante la triangolazione (vedi _riga_stato).
+        var _riga_stato = function(coda) { stato.innerHTML = dettaglio + '<br>' + coda; };
+        _riga_stato('Triangolo i ' + profili.length + ' nuovi…');
         // Crea le card skeleton
         profili.forEach(function(p, i) {
             var el = document.createElement('div');
@@ -447,9 +452,9 @@ async function smartCerca() {
         await _poolTriangola(profili, 3, async function(p, i) {
             await smartDossier(p, document.getElementById('dossier-' + i));
             completati++;
-            stato.textContent = 'Triangolati ' + completati + '/' + profili.length + ' profili.';
+            _riga_stato('Triangolati ' + completati + '/' + profili.length + ' profili.');
         });
-        stato.textContent = 'Fatto: ' + profili.length + ' dossier triangolati.';
+        _riga_stato('Fatto: ' + profili.length + ' dossier triangolati.');
     } catch (e) {
         errore.textContent = (e && e.name === 'AbortError')
             ? 'La ricerca ha impiegato troppo tempo. Riprova: ogni volta esploro pagine e criteri diversi.'
