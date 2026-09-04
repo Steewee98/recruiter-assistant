@@ -54,6 +54,12 @@
             <span>Ricerca LinkedIn</span>
         </a>
 
+        <a href="{{ url_for('albo.index') }}"
+           class="nav-item {% if request.blueprint == 'albo' %}active{% endif %}">
+            <span class="nav-icon">&#127963;</span>
+            <span>Albo OCF</span>
+        </a>
+
         <a href="{{ url_for('pipeline.index') }}"
            class="nav-item {% if request.blueprint in ['pipeline', 'valutazione', 'calendario'] %}active{% endif %}">
             <span class="nav-icon">&#9776;</span>

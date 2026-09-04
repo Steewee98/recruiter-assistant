@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% block title %}Albo OCF — SABIA{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Albo OCF</h1>
+    <p class="page-subtitle">
+        L'elenco ufficiale dei consulenti finanziari abilitati, filtrabile per rete e città.
+        Nessuna ricerca da pagare: è la popolazione completa, non un campione.
+    </p>
+</div>
+
+<!-- ===== Stato della fonte ===== -->
+<div class="card" style="margin-bottom:1.2rem;">
+    <div class="card-body" style="display:flex;flex-wrap:wrap;gap:1.5rem;align-items:center;justify-content:space-between;">
+        <div style="display:flex;gap:2rem;flex-wrap:wrap;">
+            <div>
+                <div style="font-size:1.6rem;font-weight:700;color:var(--blu-scuro);">
+                    {{ '{:,}'.format(stats.totale).replace(',', '.') }}
+                </div>
+                <div style="font-size:0.82rem;color:var(--grigio-testo);">consulenti in archivio</div>
+            </div>
+            <div>
+                <div style="font-size:1.6rem;font-weight:700;color:var(--blu-scuro);">{{ stats.cambi_rete_totali }}</div>
+                <div style="font-size:0.82rem;color:var(--grigio-testo);">passaggi di rete rilevati</div>
+            </div>
+            <div>
+                {% if stats.ultima_sync %}
+                <div style="font-size:0.95rem;font-weight:600;color:var(--blu-scuro);">
+                    elenco del {{ stats.ultima_sync.data_elenco or '—' }}
+                </div>
+                <div style="font-size:0.82rem;color:var(--grigio-testo);">
+                    aggiornato il {{ (stats.ultima_sync.eseguito_il or '')[:10] }}
+                    {% if stats.ultima_sync.esito != 'ok' %}
+                        · <span style="color:#dc2626;">ultima sincronizzazione fallita</span>
+                    {% endif %}
+                </div>
+                {% else %}
+                <div style="font-size:0.95rem;font-weight:600;color:#b45309;">Mai sincronizzato</div>
+                <div style="font-size:0.82rem;color:var(--grigio-testo);">scarica l'elenco per iniziare</div>
+                {% endif %}
+            </div>
+        </div>
+        <div style="text-align:right;">
+            <button class="btn btn-primary" id="btn-sync" onclick="sincronizza()">
+                &#8635; Aggiorna dall'albo
+            </button>
+            <div id="sync-stato" style="font-size:0.8rem;color:var(--grigio-testo);margin-top:0.4rem;"></div>
+        </div>
+    </div>
+</div>
+
+<div style="display:grid;grid-template-columns:320px 1fr;gap:1.2rem;align-items:start;">
+
+    <!-- ===== Filtri ===== -->
+    <div class="card">
+        <div class="card-header"><h3>Chi cerchi</h3></div>
+        <div class="card-body">
+            <label class="form-label">Rete</label>
+            <select class="form-select" id="f-rete">
+                <option value="">Tutte tranne Fideuram</option>
+                {% for r in stats.reti %}
+                <option value="{{ r.rete }}">{{ r.rete }} ({{ r.n }})</option>
+                {% endfor %}
+            </select>
+
+            <label class="form-label" style="margin-top:0.8rem;">Comune</label>
+            <input class="form-input" id="f-comune" placeholder="Es. Roma" autocomplete="off">
+
+            <label class="form-label" style="margin-top:0.8rem;">Provincia (sigla)</label>
+            <input class="form-input" id="f-provincia" placeholder="Es. RM" maxlength="2" autocomplete="off">
+
+            <div style="display:flex;gap:0.5rem;margin-top:0.8rem;">
+                <div style="flex:1;">
+                    <label class="form-label">Età da</label>
+                    <input class="form-input" id="f-eta-min" type="number" min="20" max="80" placeholder="30">
+                </div>
+                <div style="flex:1;">
+                    <label class="form-label">a</label>
+                    <input class="form-input" id="f-eta-max" type="number" min="20" max="80" placeholder="55">
+                </div>
+            </div>
+
+            <button class="btn btn-primary" style="width:100%;margin-top:1rem;justify-content:center;"
+                    onclick="cercaAlbo(0)">Cerca nell'albo</button>
+            <div id="albo-errore" class="hidden" style="color:#dc2626;font-size:0.85rem;margin-top:0.6rem;"></div>
+        </div>
+    </div>
+
+    <!-- ===== Risultati ===== -->
+    <div>
+        <div id="albo-stato" style="font-size:0.88rem;color:var(--grigio-testo);margin-bottom:0.7rem;">
+            Imposta i filtri e cerca. I risultati arrivano dal database locale: nessuna attesa, nessun costo.
+        </div>
+        <div id="albo-azioni" class="hidden" style="margin-bottom:0.8rem;">
+            <button class="btn btn-secondary" onclick="selezionaTutti()">Seleziona tutti i nuovi</button>
+            <button class="btn btn-primary" onclick="importaSelezionati()">Importa in pipeline</button>
+        </div>
+        <div id="albo-risultati"></div>
+        <div id="albo-paginazione" style="margin-top:1rem;text-align:center;"></div>
+    </div>
+</div>
+
+<!-- ===== Radar movimenti ===== -->
+<div class="card" style="margin-top:1.5rem;">
+    <div class="card-header">
+        <h3>Passaggi di rete rilevati</h3>
+    </div>
+    <div class="card-body">
+        {% if movimenti %}
+        <table class="table">
+            <thead><tr><th>Consulente</th><th>Città</th><th>Da</th><th>A</th><th>Rilevato</th></tr></thead>
+            <tbody>
+            {% for m in movimenti %}
+                <tr>
+                    <td><strong>{{ m.nome }} {{ m.cognome }}</strong></td>
+                    <td>{{ m.comune }}{% if m.provincia %} ({{ m.provincia }}){% endif %}</td>
+                    <td>{{ m.rete_precedente or '—' }}</td>
+                    <td>{{ m.rete_nuova or '—' }}</td>
+                    <td>{{ (m.rilevato_il or '')[:10] }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color:var(--grigio-testo);font-size:0.9rem;margin:0;">
+            Ancora nessun movimento. I passaggi di rete si ottengono confrontando due elenchi
+            successivi: dopo la <strong>seconda</strong> sincronizzazione (l'albo viene aggiornato
+            da OCF di continuo) qui compare chi ha cambiato bandiera, con nome, città e rete di
+            partenza.
+        </p>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+// ── Sincronizzazione elenco ufficiale ────────────────────────────────────────
+async function sincronizza() {
+    var btn = document.getElementById('btn-sync');
+    var stato = document.getElementById('sync-stato');
+    btn.disabled = true;
+    stato.textContent = 'Scarico l’elenco da OCF…';
+    try {
+        var r = await fetch('/albo/sincronizza', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({elenco: 'abilitati'})
+        });
+        var d = await r.json();
+        if (!d.ok) { stato.textContent = d.errore || 'Avvio non riuscito.'; btn.disabled = false; return; }
+        seguiSync();
+    } catch (e) {
+        stato.textContent = 'Errore di rete nell’avvio della sincronizzazione.';
+        btn.disabled = false;
+    }
+}
+
+function seguiSync() {
+    var stato = document.getElementById('sync-stato');
+    var btn = document.getElementById('btn-sync');
+    var t = setInterval(async function () {
+        try {
+            var d = await (await fetch('/albo/stato-sync')).json();
+            if (d.in_corso) { stato.textContent = 'Sincronizzazione in corso… (56.000 righe, un paio di minuti)'; return; }
+            clearInterval(t);
+            btn.disabled = false;
+            var e = d.esito || {};
+            if (e.ok) {
+                stato.innerHTML = 'Fatto: ' + e.totale + ' consulenti · ' + e.nuovi + ' nuovi · '
+                    + e.cambi_rete + ' cambi di rete · ' + e.usciti + ' usciti.';
+                setTimeout(function(){ location.reload(); }, 1500);
+            } else {
+                stato.textContent = e.errore || 'Sincronizzazione non riuscita.';
+            }
+        } catch (err) { clearInterval(t); btn.disabled = false; }
+    }, 3000);
+}
+
+// ── Ricerca ──────────────────────────────────────────────────────────────────
+var _offset = 0, _ultimaRicerca = null;
+
+async function cercaAlbo(offset) {
+    var cont = document.getElementById('albo-risultati');
+    var stato = document.getElementById('albo-stato');
+    var errore = document.getElementById('albo-errore');
+    errore.classList.add('hidden');
+    stato.textContent = 'Cerco…';
+    _offset = offset || 0;
+    _ultimaRicerca = {
+        rete: document.getElementById('f-rete').value,
+        comune: document.getElementById('f-comune').value.trim(),
+        provincia: document.getElementById('f-provincia').value.trim(),
+        eta_min: document.getElementById('f-eta-min').value,
+        eta_max: document.getElementById('f-eta-max').value,
+        limite: 50, offset: _offset
+    };
+    try {
+        var r = await fetch('/albo/cerca', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(_ultimaRicerca)
+        });
+        var d = await r.json();
+        if (!r.ok) { errore.textContent = d.errore || 'Ricerca non riuscita.'; errore.classList.remove('hidden'); stato.textContent = ''; return; }
+        disegna(d);
+    } catch (e) {
+        errore.textContent = 'Errore di rete durante la ricerca.';
+        errore.classList.remove('hidden');
+        stato.textContent = '';
+    }
+}
+
+function disegna(d) {
+    var cont = document.getElementById('albo-risultati');
+    var stato = document.getElementById('albo-stato');
+    var azioni = document.getElementById('albo-azioni');
+    cont.innerHTML = '';
+    if (!d.profili.length) {
+        stato.textContent = 'Nessun consulente con questi filtri.';
+        azioni.classList.add('hidden');
+        document.getElementById('albo-paginazione').innerHTML = '';
+        return;
+    }
+    stato.innerHTML = '<strong>' + d.totale + '</strong> consulenti corrispondono · '
+        + 'ne mostro ' + d.profili.length + ' (dal ' + (_offset + 1) + '&deg;) · '
+        + d.nuovi + ' non ancora in pipeline.';
+    azioni.classList.remove('hidden');
+
+    var righe = d.profili.map(function (p, i) {
+        var badge = p.gia_in_pipeline
+            ? '<span style="font-size:0.72rem;background:#f1f5f9;color:#64748b;padding:2px 7px;border-radius:10px;">gi&agrave; in pipeline</span>'
+            : '';
+        var anz = '';
+        if (p.n_cambi > 0) anz = ' · ' + p.n_cambi + ' cambio/i di rete';
+        return '<tr>'
+            + '<td><input type="checkbox" class="sel-albo" data-i="' + i + '"' + (p.gia_in_pipeline ? ' disabled' : '') + '></td>'
+            + '<td><strong>' + esc(p.nome_completo) + '</strong> ' + badge + '</td>'
+            + '<td>' + esc(p.rete || '—') + '</td>'
+            + '<td>' + esc(p.comune || '') + (p.provincia ? ' (' + esc(p.provincia) + ')' : '') + '</td>'
+            + '<td>' + (p.eta ? p.eta + ' anni' : '—') + anz + '</td>'
+            + '</tr>';
+    }).join('');
+
+    cont.innerHTML = '<table class="table"><thead><tr><th></th><th>Consulente</th><th>Rete</th>'
+        + '<th>Città</th><th>Profilo</th></tr></thead><tbody>' + righe + '</tbody></table>';
+    cont._profili = d.profili;
+
+    var pag = '';
+    if (_offset > 0) pag += '<button class="btn btn-secondary" onclick="cercaAlbo(' + Math.max(0, _offset - 50) + ')">← Precedenti</button> ';
+    if (_offset + d.profili.length < d.totale) pag += '<button class="btn btn-secondary" onclick="cercaAlbo(' + (_offset + 50) + ')">Successivi →</button>';
+    document.getElementById('albo-paginazione').innerHTML = pag;
+}
+
+function selezionaTutti() {
+    document.querySelectorAll('.sel-albo:not(:disabled)').forEach(function (c) { c.checked = true; });
+}
+
+async function importaSelezionati() {
+    var cont = document.getElementById('albo-risultati');
+    var scelti = [];
+    document.querySelectorAll('.sel-albo:checked').forEach(function (c) {
+        scelti.push(cont._profili[parseInt(c.dataset.i, 10)]);
+    });
+    if (!scelti.length) { alert('Seleziona almeno un consulente.'); return; }
+    var stato = document.getElementById('albo-stato');
+    stato.textContent = 'Importo ' + scelti.length + ' consulenti…';
+    var r = await fetch('/albo/importa', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({profili: scelti})
+    });
+    var d = await r.json();
+    if (d.ok) {
+        stato.innerHTML = 'Importati <strong>' + d.inseriti + '</strong> in pipeline'
+            + (d.saltati ? ' · ' + d.saltati + ' saltati (già presenti)' : '') + '.';
+        cercaAlbo(_offset);
+    } else {
+        stato.textContent = d.errore || 'Import non riuscito.';
+    }
+}
+
+function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+    });
+}
+</script>
+{% endblock %}

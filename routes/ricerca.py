@@ -972,6 +972,24 @@ def smart_cerca():
             if c["tag"] == "rete" and azienda_combo not in reti_extra_usate:
                 reti_extra_usate.append(azienda_combo)
 
+    # ── Verifica sull'albo OCF ────────────────────────────────────────────────
+    # LinkedIn dice quello che la persona ha scritto; l'albo dice dov'è davvero
+    # oggi. Una sola query locale per tutta la lista: nessun costo, nessuna attesa.
+    try:
+        from services.albo_ocf import verifica_batch
+        albo = verifica_batch([(p["nome"], p["cognome"]) for p in profili])
+        for p in profili:
+            k = f"{(p['cognome'] or '').lower()}|{(p['nome'] or '').lower()}"
+            info = albo.get(k) or {"trovato": False}
+            p["albo"] = info
+            # Se l'albo conosce la rete e LinkedIn dice altro, vince l'albo:
+            # è il dato ufficiale, e il recruiting si fa sulla rete di oggi.
+            if info.get("rete") and info["rete"].lower() not in (p.get("azienda") or "").lower():
+                p["azienda_linkedin"] = p.get("azienda", "")
+                p["azienda"] = info["rete"]
+    except Exception as e:
+        log.warning("Verifica albo non riuscita (proseguo senza): %s", e)
+
     # Traccia la ricerca smart per far avanzare la rotazione delle pagine
     try:
         db.execute(

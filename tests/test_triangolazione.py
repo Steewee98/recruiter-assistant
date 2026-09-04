@@ -87,7 +87,9 @@ def test_interpreta_query_vuota_non_chiama_api():
     """Query vuota → fallback immediato senza toccare l'API."""
     from ai_helpers import interpreta_query_ricerca
     d = interpreta_query_ricerca("")
-    assert set(d.keys()) == {"ruolo", "citta", "azienda", "parole_chiave"}
+    # Il fallback può restituire anche gli assi di allargamento (ruoli_correlati,
+    # citta_vicine): quello che conta è che i campi base ci siano sempre.
+    assert set(d.keys()) >= {"ruolo", "citta", "azienda", "parole_chiave"}
     assert d["ruolo"] == ""
 
 

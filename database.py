@@ -408,6 +408,67 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_ricerche_tipo            ON ricerche_automatiche(tipo_profilo)",
         "CREATE INDEX IF NOT EXISTS idx_profili_ricerca_id       ON profili_ricerca(ricerca_id)",
         "CREATE INDEX IF NOT EXISTS idx_profili_candidato_id     ON profili_ricerca(candidato_id)",
+
+        # ── Albo OCF: elenco ufficiale dei consulenti finanziari abilitati ────
+        # Fonte: organismocf.it → "Elenchi iscritti" (ZIP di CSV per regione).
+        # Popolazione completa del mercato target, aggiornata da OCF.
+        # NB: dati MINIMIZZATI — niente indirizzo, CAP o data di nascita esatta
+        # (vedi connettori/ocf_elenco.py). `chiave` è un hash irreversibile che
+        # serve solo a riconoscere la stessa persona fra due elenchi successivi.
+        """CREATE TABLE IF NOT EXISTS ocf_iscritti (
+            id                SERIAL PRIMARY KEY,
+            chiave            TEXT UNIQUE NOT NULL,
+            nome              TEXT,
+            cognome           TEXT,
+            anno_nascita      INTEGER,
+            comune            TEXT,
+            provincia         TEXT,
+            regione           TEXT,
+            rete              TEXT,
+            rete_raw          TEXT,
+            elenco            TEXT DEFAULT 'abilitati',
+            attivo            BOOLEAN DEFAULT TRUE,
+            rete_dal          DATE,
+            rete_dal_stimata  BOOLEAN DEFAULT TRUE,
+            n_cambi           INTEGER DEFAULT 0,
+            primo_avvistamento DATE,
+            ultimo_avvistamento DATE
+        )""",
+        # Movimenti rilevati confrontando due elenchi successivi: è il "radar"
+        # dei passaggi di rete, su dati ufficiali e su tutta la popolazione.
+        """CREATE TABLE IF NOT EXISTS ocf_movimenti (
+            id              SERIAL PRIMARY KEY,
+            chiave          TEXT NOT NULL,
+            nome            TEXT,
+            cognome         TEXT,
+            comune          TEXT,
+            provincia       TEXT,
+            tipo            TEXT NOT NULL,
+            rete_precedente TEXT,
+            rete_nuova      TEXT,
+            data_elenco     DATE,
+            rilevato_il     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            visto           BOOLEAN DEFAULT FALSE
+        )""",
+        # Storico delle sincronizzazioni (diagnostica onesta: cosa è cambiato e quando)
+        """CREATE TABLE IF NOT EXISTS ocf_sync (
+            id            SERIAL PRIMARY KEY,
+            elenco        TEXT,
+            data_elenco   DATE,
+            totale        INTEGER DEFAULT 0,
+            nuovi         INTEGER DEFAULT 0,
+            cambi_rete    INTEGER DEFAULT 0,
+            usciti        INTEGER DEFAULT 0,
+            esito         TEXT,
+            errore        TEXT,
+            eseguito_il   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_ocf_rete       ON ocf_iscritti(rete)",
+        "CREATE INDEX IF NOT EXISTS idx_ocf_comune     ON ocf_iscritti(comune)",
+        "CREATE INDEX IF NOT EXISTS idx_ocf_provincia  ON ocf_iscritti(provincia)",
+        "CREATE INDEX IF NOT EXISTS idx_ocf_cognome    ON ocf_iscritti(cognome)",
+        "CREATE INDEX IF NOT EXISTS idx_ocf_mov_data   ON ocf_movimenti(rilevato_il DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_ocf_mov_tipo   ON ocf_movimenti(tipo)",
     ]
 
     for i, sql in enumerate(statements):

@@ -367,6 +367,25 @@ function _tipoSmart() {
 function _escapeHtml(s) {
     return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+// Badge di verifica sull'albo ufficiale OCF: dice se il profilo LinkedIn
+// corrisponde a un consulente finanziario davvero iscritto, e in che rete è OGGI
+// (l'headline LinkedIn è spesso ferma a due lavori fa).
+function _badgeAlbo(p) {
+    var a = p.albo;
+    if (!a) return '';
+    var stile = 'font-size:0.72rem;padding:2px 8px;border-radius:10px;display:inline-block;margin-bottom:0.5rem;';
+    if (!a.trovato)
+        return '<div><span style="' + stile + 'background:#fef3c7;color:#92400e;">'
+             + 'non trovato nell&#39;albo OCF</span></div>';
+    if (a.ambiguo)
+        return '<div><span style="' + stile + 'background:#e0f2fe;color:#075985;">'
+             + 'albo OCF: ' + a.quanti + ' omonimi, da verificare</span></div>';
+    var extra = (a.n_cambi ? ' · ' + a.n_cambi + ' cambio/i rete' : '');
+    var luogo = a.comune ? ' · ' + _escapeHtml(a.comune) : '';
+    return '<div><span style="' + stile + 'background:#dcfce7;color:#166534;">&#10003; albo OCF'
+         + (a.rete ? ' · ' + _escapeHtml(a.rete) : '') + luogo + extra + '</span></div>';
+}
+
 async function smartCerca() {
     var query = document.getElementById('smart-query').value.trim();
     var cont = document.getElementById('smart-risultati');
@@ -443,6 +462,7 @@ async function smartCerca() {
                 + _escapeHtml((p.nome||'') + ' ' + (p.cognome||'')) + '</div>'
                 + '<div style="font-size:0.85rem;color:var(--grigio-testo);margin:0.15rem 0 0.6rem;">'
                 + _escapeHtml(p.ruolo||'—') + (p.azienda ? ' · ' + _escapeHtml(p.azienda) : '') + '</div>'
+                + _badgeAlbo(p)
                 + '<div class="dossier-body" style="font-size:0.85rem;color:var(--grigio-testo);">'
                 + '<span class="spinner"></span> Triangolazione in corso…</div>';
             cont.appendChild(el);
