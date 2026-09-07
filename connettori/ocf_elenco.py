@@ -98,10 +98,44 @@ _SUFFISSI_LEGALI = re.compile(
     r"SOCIETA'? PER AZIONI|BANCA POPOLARE|GRUPPO)\b", re.IGNORECASE)
 
 
+# Reti che appartengono allo stesso gruppo bancario. Serve a NON contare come
+# "passaggio" ciò che è una riorganizzazione interna: chi va da Sanpaolo Invest a
+# Fideuram, o da Credito Emiliano a Credem Euromobiliare, non ha cambiato casacca.
+# Senza questa mappa i tassi di mobilità risultano gonfiati di 3-4 volte
+# (misurato sugli elenchi 2022-2026).
+GRUPPI_BANCARI = {
+    "Fideuram": "Intesa", "Intesa Sanpaolo": "Intesa",
+    "Intesa Sanpaolo Private Banking": "Intesa", "Sanpaolo Invest": "Intesa",
+    "IW Private Investments": "Intesa", "Iw Bank": "Intesa",
+    "Credito Emiliano": "Credem", "Credem Euromobiliare": "Credem",
+    "Banca Euromobiliare": "Credem",
+    "Chebanca!": "Mediobanca", "Mediobanca Premier": "Mediobanca",
+    "Mediobanca - Banca Di Credito Finanziario": "Mediobanca",
+    "BPER Banca": "BPER", "Banca Cesare Ponti": "BPER",
+    "Banca Carige - Cassa Di Risparmio Di Genova E Imperia": "BPER",
+    "Banca Sella": "Sella", "Banca Sella -": "Sella", "Banca Patrimoni Sella": "Sella",
+    "UniCredit": "UniCredit", "Cordusio": "UniCredit",
+    "Deutsche Bank": "Zurich", "Zurich Bank": "Zurich",
+}
+
+
+def gruppo_di(rete: str) -> str:
+    """Gruppo bancario di una rete (la rete stessa se non appartiene a un gruppo noto)."""
+    return GRUPPI_BANCARI.get(rete or "", rete or "")
+
+
+def stesso_gruppo(rete_a: str, rete_b: str) -> bool:
+    """True se il passaggio fra due reti è interno allo stesso gruppo."""
+    if not rete_a or not rete_b:
+        return False
+    return gruppo_di(rete_a) == gruppo_di(rete_b)
+
+
 def normalizza_rete(denominazione: str) -> str:
     """Ragione sociale ufficiale → etichetta breve e stabile della rete."""
     d = (denominazione or "").strip().strip(";").strip()
-    if not d:
+    # Negli elenchi più vecchi il valore mancante è il marcatore SQL "\N"
+    if not d or d in ("\\N", "N", "NULL"):
         return ""
     up = d.upper()
     for chiave, etichetta in _RETI_NOTE:

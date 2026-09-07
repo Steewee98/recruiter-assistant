@@ -467,6 +467,11 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_ocf_comune     ON ocf_iscritti(comune)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_provincia  ON ocf_iscritti(provincia)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_cognome    ON ocf_iscritti(cognome)",
+        # Un passaggio "societario" (fusione, cambio di ragione sociale, giro
+        # interno al gruppo) non e' una scelta individuale: va tracciato ma tenuto
+        # fuori da statistiche e da qualunque etichetta di addestramento.
+        "ALTER TABLE ocf_movimenti ADD COLUMN IF NOT EXISTS societario BOOLEAN DEFAULT FALSE",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_ocf_mov_unico ON ocf_movimenti(chiave, data_elenco)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_mov_data   ON ocf_movimenti(rilevato_il DESC)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_mov_tipo   ON ocf_movimenti(tipo)",
     ]

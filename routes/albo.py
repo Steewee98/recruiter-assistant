@@ -83,9 +83,38 @@ def _forse_sincronizza_auto() -> bool:
 def index():
     _forse_sincronizza_auto()
     stats = albo_ocf.statistiche()
-    ultimi_movimenti = albo_ocf.movimenti(tipo="cambio_rete", giorni=365, limite=50)
+    # 1826 giorni ≈ 5 anni: lo storico ricostruito parte dal 2022
+    ultimi_movimenti = albo_ocf.movimenti(tipo="cambio_rete", giorni=1826, limite=50)
     return render_template("albo.html", stats=stats, movimenti=ultimi_movimenti,
+                           mobilita=albo_ocf.mobilita_per_rete(200)[:15],
                            sync_in_corso=_sync_stato["in_corso"])
+
+
+@albo_bp.route("/albo/storico", methods=["POST"])
+@login_required
+def storico():
+    """
+    Ricostruisce i passaggi passati dagli elenchi archiviati (Wayback Machine).
+    Operazione lunga (scarica più archivi): gira in background come la sync.
+    """
+    with _sync_lock:
+        if _sync_stato["in_corso"]:
+            return jsonify({"ok": False, "errore": "Un aggiornamento è già in corso."}), 409
+        _sync_stato["in_corso"] = True
+        _sync_stato["esito"] = None
+
+    def _lavora():
+        try:
+            esito = albo_ocf.importa_storico()
+        except Exception as e:
+            log.error("Import storico fallito: %s", e, exc_info=True)
+            esito = {"ok": False, "errore": str(e)}
+        with _sync_lock:
+            _sync_stato["esito"] = esito
+            _sync_stato["in_corso"] = False
+
+    threading.Thread(target=_lavora, daemon=True).start()
+    return jsonify({"ok": True, "avviata": True})
 
 
 @albo_bp.route("/albo/sincronizza", methods=["POST"])

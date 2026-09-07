@@ -45,6 +45,9 @@
             <button class="btn btn-primary" id="btn-sync" onclick="sincronizza()">
                 &#8635; Aggiorna dall'albo
             </button>
+            <button class="btn btn-secondary" id="btn-storico" onclick="ricostruisci()">
+                &#128337; Ricostruisci lo storico
+            </button>
             <div id="sync-stato" style="font-size:0.8rem;color:var(--grigio-testo);margin-top:0.4rem;"></div>
         </div>
     </div>
@@ -101,6 +104,43 @@
     </div>
 </div>
 
+<!-- ===== Dove conviene pescare ===== -->
+<div class="card" style="margin-top:1.5rem;">
+    <div class="card-header"><h3>Da quali reti si esce di più</h3></div>
+    <div class="card-body">
+        {% if mobilita %}
+        <p style="font-size:0.85rem;color:var(--grigio-testo);margin:0 0 0.8rem;">
+            Passaggi <strong>individuali</strong> osservati negli elenchi ufficiali dal 2022 a oggi.
+            Fusioni, cambi di ragione sociale e spostamenti interni allo stesso gruppo bancario
+            sono esclusi: non sono scelte delle persone. Il denominatore è limitato alle regioni
+            per cui esiste storico.
+        </p>
+        <table class="table">
+            <thead><tr><th>Rete</th><th>Consulenti</th><th>Usciti</th><th>Entrati</th>
+                       <th>Tasso di uscita</th><th>Saldo</th></tr></thead>
+            <tbody>
+            {% for r in mobilita %}
+                <tr>
+                    <td><strong>{{ r.rete }}</strong></td>
+                    <td>{{ r.consulenti }}</td>
+                    <td>{{ r.usciti }}</td>
+                    <td>{{ r.entrati }}</td>
+                    <td><strong>{{ r.tasso_uscita }}%</strong></td>
+                    <td style="color:{% if r.saldo < 0 %}#dc2626{% else %}#166534{% endif %};">
+                        {{ '%+d'|format(r.saldo) }}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color:var(--grigio-testo);font-size:0.9rem;margin:0;">
+            Serve lo storico dei passaggi: premi «Ricostruisci lo storico».
+        </p>
+        {% endif %}
+    </div>
+</div>
+
 <!-- ===== Radar movimenti ===== -->
 <div class="card" style="margin-top:1.5rem;">
     <div class="card-header">
@@ -154,6 +194,23 @@ async function sincronizza() {
     }
 }
 
+// Recupera gli elenchi archiviati dal 2022 e ne ricava i passaggi passati:
+// evita di dover aspettare mesi prima di avere abbastanza movimenti osservati.
+async function ricostruisci() {
+    var btn = document.getElementById('btn-storico');
+    var stato = document.getElementById('sync-stato');
+    btn.disabled = true;
+    stato.textContent = 'Recupero gli elenchi archiviati (può richiedere qualche minuto)…';
+    try {
+        var d = await (await fetch('/albo/storico', {method: 'POST'})).json();
+        if (!d.ok) { stato.textContent = d.errore || 'Avvio non riuscito.'; btn.disabled = false; return; }
+        seguiSync();
+    } catch (e) {
+        stato.textContent = 'Errore di rete nell’avvio della ricostruzione.';
+        btn.disabled = false;
+    }
+}
+
 function seguiSync() {
     var stato = document.getElementById('sync-stato');
     var btn = document.getElementById('btn-sync');
@@ -163,8 +220,13 @@ function seguiSync() {
             if (d.in_corso) { stato.textContent = 'Sincronizzazione in corso… (56.000 righe, un paio di minuti)'; return; }
             clearInterval(t);
             btn.disabled = false;
+            document.getElementById('btn-storico').disabled = false;
             var e = d.esito || {};
-            if (e.ok) {
+            if (e.ok && e.snapshot !== undefined) {
+                stato.innerHTML = 'Storico ricostruito: ' + e.snapshot + ' elenchi archiviati · '
+                    + e.movimenti + ' movimenti · ' + (e.regioni || []).length + ' regioni coperte.';
+                setTimeout(function(){ location.reload(); }, 1500);
+            } else if (e.ok) {
                 stato.innerHTML = 'Fatto: ' + e.totale + ' consulenti · ' + e.nuovi + ' nuovi · '
                     + e.cambi_rete + ' cambi di rete · ' + e.usciti + ' usciti.';
                 setTimeout(function(){ location.reload(); }, 1500);

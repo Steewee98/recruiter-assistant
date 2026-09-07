@@ -204,6 +204,66 @@ def test_verifica_dichiara_omonimia():
     db.close()
 
 
+# ── Eventi societari: fusioni e rinomine non sono passaggi ───────────────────
+
+def test_stesso_gruppo():
+    from connettori.ocf_elenco import stesso_gruppo
+    assert stesso_gruppo("Sanpaolo Invest", "Fideuram"), "giro interno al gruppo Intesa"
+    assert stesso_gruppo("Credito Emiliano", "Credem Euromobiliare")
+    assert stesso_gruppo("Chebanca!", "Mediobanca Premier")
+    assert not stesso_gruppo("Azimut", "Fideuram"), "questo è un passaggio vero"
+    assert not stesso_gruppo("", "Fideuram")
+
+
+def test_marcatore_N_negli_elenchi_vecchi():
+    """Negli elenchi 2022 il valore mancante è il letterale \\N, non la stringa vuota."""
+    from connettori.ocf_elenco import normalizza_rete
+    assert normalizza_rete("\\N") == ""
+    assert normalizza_rete("NULL") == ""
+
+
+def test_confronto_marca_flussi_di_massa_e_di_gruppo():
+    """
+    Una rete che cambia nome (tutti da A a B) e un giro interno al gruppo devono
+    risultare 'societari'; il passaggio singolo verso un concorrente no.
+    """
+    from services.albo_ocf import _confronta
+    prima, dopo = {}, {}
+    for i in range(40):                       # rinomina di massa: Deutsche → Zurich
+        k = f"massa{i}"
+        prima[k] = {"rete": "Deutsche Bank"}
+        dopo[k] = {"rete": "Zurich Bank", "nome": "A", "cognome": f"B{i}",
+                   "comune": "Roma", "provincia": "RM"}
+    prima["gruppo1"] = {"rete": "Sanpaolo Invest"}      # giro interno al gruppo
+    dopo["gruppo1"] = {"rete": "Fideuram", "nome": "C", "cognome": "D",
+                       "comune": "Roma", "provincia": "RM"}
+    prima["vero1"] = {"rete": "Azimut"}                 # passaggio vero
+    dopo["vero1"] = {"rete": "Fideuram", "nome": "E", "cognome": "F",
+                     "comune": "Milano", "provincia": "MI"}
+
+    import datetime
+    mov = _confronta(prima, dopo, datetime.date(2026, 1, 1), "a", "b")
+    veri = [m for m in mov if not m["societario"]]
+    assert len(mov) == 42
+    assert len(veri) == 1 and veri[0]["chiave"] == "vero1", \
+        f"atteso 1 passaggio vero, ottenuti {[m['chiave'] for m in veri]}"
+
+
+def test_zip_troncato_recupera_le_voci_intere():
+    """Le copie archiviate sono tagliate a 1 MiB: le voci intere vanno recuperate lo stesso."""
+    import io as _io, zipfile as _zip
+    from connettori.ocf_storico import csv_da_zip_troncato
+    buf = _io.BytesIO()
+    with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as z:
+        z.writestr("LAZIO_CFAB.csv", '"A","B","01/01/1980","R","RM","V","1","00100","ROMA","RM","AZIMUT CAPITAL MANAGEMENT SGR SPA","LAZIO"\n' * 50)
+        z.writestr("VENETO_CFAB.csv", '"C","D","02/02/1980","R","RM","V","1","00100","ROMA","RM","BANCA GENERALI SPA","VENETO"\n' * 50)
+    intero = buf.getvalue()
+    tagliato = intero[:int(len(intero) * 0.6)]      # via la coda e l'ultima voce
+    recuperati = csv_da_zip_troncato(tagliato)
+    assert "LAZIO_CFAB.csv" in recuperati, "la prima voce doveva essere recuperata"
+    assert len(recuperati["LAZIO_CFAB.csv"].splitlines()) == 50
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv

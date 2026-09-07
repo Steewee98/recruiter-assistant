@@ -104,6 +104,7 @@ def sincronizza(elenco: str = "abilitati", zip_bytes: bytes = None) -> dict:
                   FROM ocf_stg s
                   JOIN ocf_iscritti i ON i.chiave = s.chiave AND i.elenco = %s
                  WHERE COALESCE(i.rete,'') <> COALESCE(s.rete,'')
+                ON CONFLICT DO NOTHING
             """, (d_elenco, elenco))
             esito["cambi_rete"] = cur.rowcount
 
@@ -116,6 +117,7 @@ def sincronizza(elenco: str = "abilitati", zip_bytes: bytes = None) -> dict:
                   FROM ocf_stg s
                   LEFT JOIN ocf_iscritti i ON i.chiave = s.chiave AND i.elenco = %s
                  WHERE i.chiave IS NULL
+                ON CONFLICT DO NOTHING
             """, (d_elenco, elenco))
             esito["nuovi"] = cur.rowcount
 
@@ -128,8 +130,11 @@ def sincronizza(elenco: str = "abilitati", zip_bytes: bytes = None) -> dict:
                   FROM ocf_iscritti i
                   LEFT JOIN ocf_stg s ON s.chiave = i.chiave
                  WHERE i.elenco = %s AND i.attivo = TRUE AND s.chiave IS NULL
+                ON CONFLICT DO NOTHING
             """, (d_elenco, elenco))
             esito["usciti"] = cur.rowcount
+            esito["societari"] = _marca_societari(cur, d_elenco)
+            esito["cambi_rete"] = max(0, esito["cambi_rete"] - esito["societari"])
 
         # 3) Aggiorna lo snapshot.
         #    - chi cambia rete: rete_dal = data elenco, rete_dal_stimata = FALSE
@@ -183,6 +188,53 @@ def sincronizza(elenco: str = "abilitati", zip_bytes: bytes = None) -> dict:
 
     _registra_sync(esito)
     return esito
+
+
+def _marca_societari(cur, data_elenco) -> int:
+    """
+    Marca come `societario` i cambi di rete che non sono scelte individuali:
+    passaggi interni allo stesso gruppo bancario, oppure flussi di massa da una
+    rete all'altra (fusione o cambio di ragione sociale).
+
+    Senza questo passaggio il radar direbbe "635 persone hanno lasciato Deutsche
+    Bank" quando in realtà Deutsche Bank è diventata Zurich Bank.
+    Ritorna quanti movimenti sono stati marcati.
+    """
+    from connettori.ocf_elenco import stesso_gruppo
+
+    cur.execute("""
+        SELECT rete_precedente, rete_nuova, COUNT(*) AS n
+          FROM ocf_movimenti
+         WHERE tipo = 'cambio_rete' AND data_elenco = %s
+         GROUP BY rete_precedente, rete_nuova
+    """, (data_elenco,))
+    coppie = [dict(r) for r in cur.fetchall()]
+    if not coppie:
+        return 0
+
+    cur.execute("SELECT rete, COUNT(*) AS n FROM ocf_iscritti WHERE attivo = TRUE GROUP BY rete")
+    popolazione = {r["rete"]: r["n"] for r in cur.fetchall()}
+
+    da_marcare = []
+    for c in coppie:
+        r0, r1, n = c["rete_precedente"], c["rete_nuova"], c["n"]
+        di_massa = (n >= SOGLIA_PERSONE_SOCIETARIA
+                    and n / max(1, popolazione.get(r0, 1)) >= SOGLIA_QUOTA_SOCIETARIA)
+        if di_massa or stesso_gruppo(r0 or "", r1 or ""):
+            da_marcare.append((r0, r1))
+
+    marcati = 0
+    for r0, r1 in da_marcare:
+        cur.execute("""
+            UPDATE ocf_movimenti SET societario = TRUE
+             WHERE tipo = 'cambio_rete' AND data_elenco = %s
+               AND rete_precedente IS NOT DISTINCT FROM %s
+               AND rete_nuova IS NOT DISTINCT FROM %s
+        """, (data_elenco, r0, r1))
+        marcati += cur.rowcount
+    if marcati:
+        logger.info("Sync OCF: %d movimenti marcati come societari", marcati)
+    return marcati
 
 
 def _registra_sync(esito: dict) -> None:
@@ -367,12 +419,16 @@ def verifica_batch(persone: list) -> dict:
 
 
 def movimenti(tipo: str = "", giorni: int = 90, rete: str = "", provincia: str = "",
-              limite: int = 200) -> list:
+              limite: int = 200, includi_societari: bool = False) -> list:
     """
     Passaggi di rete rilevati dal confronto fra elenchi.
     `tipo`: 'cambio_rete' | 'nuovo' | 'uscito' (vuoto = tutti).
+    Di default esclude i passaggi societari (fusioni, rinomine, giri interni al
+    gruppo): non sono persone che hanno scelto di cambiare.
     """
     dove = ["rilevato_il >= CURRENT_DATE - CAST(? AS INTEGER)"]
+    if not includi_societari:
+        dove.append("societario IS NOT TRUE")
     par = [int(giorni)]
     if tipo:
         dove.append("tipo = ?")
@@ -395,6 +451,189 @@ def movimenti(tipo: str = "", giorni: int = 90, rete: str = "", provincia: str =
     finally:
         db.close()
     return [dict(r) for r in righe]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Storico: ricostruzione dei passaggi passati dagli elenchi archiviati
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Un flusso rete→rete che sposta almeno questa quota della rete di partenza (e
+# almeno questo numero di persone) è una fusione o un cambio di ragione sociale,
+# non un insieme di scelte individuali.
+SOGLIA_QUOTA_SOCIETARIA = 0.25
+SOGLIA_PERSONE_SOCIETARIA = 20
+
+
+def _confronta(prima: dict, dopo: dict, data_dopo, etichetta_a: str, etichetta_b: str) -> list:
+    """
+    Passaggi fra due snapshot {chiave: record}. Ogni movimento porta il flag
+    `societario`, così le riorganizzazioni non inquinano né le statistiche né
+    le etichette di un eventuale modello.
+    """
+    from connettori.ocf_elenco import stesso_gruppo
+
+    comuni = set(prima) & set(dopo)
+    popolazione = {}
+    for k in comuni:
+        r = prima[k].get("rete") or ""
+        if r:
+            popolazione[r] = popolazione.get(r, 0) + 1
+
+    grezzi = []
+    for k in comuni:
+        r0 = prima[k].get("rete") or ""
+        r1 = dopo[k].get("rete") or ""
+        if r0 and r1 and r0 != r1:
+            grezzi.append((k, r0, r1))
+
+    conteggio = {}
+    for _k, r0, r1 in grezzi:
+        conteggio[(r0, r1)] = conteggio.get((r0, r1), 0) + 1
+
+    movimenti_out = []
+    for k, r0, r1 in grezzi:
+        n = conteggio[(r0, r1)]
+        di_massa = (n >= SOGLIA_PERSONE_SOCIETARIA
+                    and n / max(1, popolazione.get(r0, 1)) >= SOGLIA_QUOTA_SOCIETARIA)
+        rec = dopo[k]
+        movimenti_out.append({
+            "chiave": k, "nome": rec.get("nome", ""), "cognome": rec.get("cognome", ""),
+            "comune": rec.get("comune", ""), "provincia": rec.get("provincia", ""),
+            "rete_precedente": r0, "rete_nuova": r1, "data_elenco": data_dopo,
+            "societario": bool(di_massa or stesso_gruppo(r0, r1)),
+            "intervallo": f"{etichetta_a}→{etichetta_b}",
+        })
+    return movimenti_out
+
+
+def importa_storico(limite_snapshot: int = 12) -> dict:
+    """
+    Ricostruisce i passaggi di rete passati dagli elenchi archiviati dal Wayback
+    Machine, e chiude la catena con lo snapshot corrente in database.
+
+    Non modifica lo stato corrente dei consulenti (che resta l'elenco ufficiale
+    più recente): scrive solo movimenti datati e aggiorna `n_cambi`.
+    Idempotente: i movimenti già presenti per la stessa persona e la stessa data
+    non vengono riscritti.
+    """
+    from connettori import ocf_storico
+
+    esito = {"ok": False, "snapshot": 0, "movimenti": 0, "societari": 0,
+             "regioni": [], "intervalli": [], "errore": None}
+
+    voci = ocf_storico.elenchi_archiviati()[:limite_snapshot]
+    if not voci:
+        esito["errore"] = ("Nessun elenco storico disponibile nell'archivio "
+                           "(Wayback Machine irraggiungibile o nulla di archiviato).")
+        return esito
+
+    snapshot = []
+    for voce in voci:
+        try:
+            persone, regioni = ocf_storico.leggi_snapshot(ocf_storico.scarica(voce))
+        except Exception as e:
+            logger.warning("Storico OCF: copia del %s non leggibile (%s)", voce["data"], e)
+            continue
+        if len(persone) < 1000:      # copia troppo mutila per essere utile
+            continue
+        snapshot.append({"data": voce["data"], "persone": persone, "regioni": regioni})
+
+    if not snapshot:
+        esito["errore"] = "Le copie archiviate non contengono dati utilizzabili."
+        return esito
+
+    # Le regioni recuperabili sono un sottoinsieme: i confronti valgono solo lì.
+    regioni_comuni = set(snapshot[0]["regioni"])
+    for s in snapshot[1:]:
+        regioni_comuni &= set(s["regioni"])
+    esito["regioni"] = sorted(regioni_comuni)
+    esito["snapshot"] = len(snapshot)
+
+    # Ultimo anello: lo stato di oggi, ristretto alle stesse regioni
+    db = get_db()
+    try:
+        righe = db.execute(
+            "SELECT chiave, nome, cognome, comune, provincia, regione, rete "
+            "FROM ocf_iscritti WHERE attivo = TRUE"
+        ).fetchall()
+    finally:
+        db.close()
+    regioni_up = {r.upper() for r in regioni_comuni}
+    oggi = {r["chiave"]: dict(r) for r in righe
+            if (r["regione"] or "").upper() in regioni_up}
+    if oggi:
+        snapshot.append({"data": date.today(), "persone": oggi, "regioni": sorted(regioni_comuni)})
+
+    movimenti_totali = []
+    for a, b in zip(snapshot, snapshot[1:]):
+        m = _confronta(a["persone"], b["persone"], b["data"],
+                       a["data"].isoformat(), b["data"].isoformat())
+        movimenti_totali += m
+        veri = sum(1 for x in m if not x["societario"])
+        esito["intervalli"].append({
+            "da": a["data"].isoformat(), "a": b["data"].isoformat(),
+            "passaggi": veri, "societari": len(m) - veri,
+            "base": len({k for k, v in a["persone"].items() if v.get("rete")}),
+        })
+
+    scritti = _scrivi_movimenti(movimenti_totali)
+    esito["movimenti"] = scritti
+    esito["societari"] = sum(1 for m in movimenti_totali if m["societario"])
+    esito["ok"] = True
+    logger.info("Storico OCF: %d snapshot, %d movimenti scritti", len(snapshot), scritti)
+    return esito
+
+
+def _scrivi_movimenti(movimenti: list) -> int:
+    """Scrive i movimenti evitando i duplicati (stessa persona, stessa data)."""
+    if not movimenti:
+        return 0
+    conn = _get_raw_connection()
+    cur = conn.cursor()
+    try:
+        # NB: execute_values esegue a pagine, quindi cur.rowcount riporta solo
+        # l'ultima pagina: il conteggio vero si fa confrontando il totale prima/dopo.
+        cur.execute("SELECT COUNT(*) AS n FROM ocf_movimenti")
+        prima = cur.fetchone()["n"] or 0
+        for i in range(0, len(movimenti), BATCH):
+            blocco = movimenti[i:i + BATCH]
+            valori = [(m["chiave"], m["nome"], m["cognome"], m["comune"], m["provincia"],
+                       "cambio_rete", m["rete_precedente"], m["rete_nuova"],
+                       m["data_elenco"], m["societario"], m["data_elenco"])
+                      for m in blocco]
+            execute_values(cur, """
+                INSERT INTO ocf_movimenti (chiave, nome, cognome, comune, provincia, tipo,
+                                           rete_precedente, rete_nuova, data_elenco,
+                                           societario, rilevato_il)
+                SELECT v.chiave, v.nome, v.cognome, v.comune, v.provincia, v.tipo,
+                       v.rete_precedente, v.rete_nuova, v.data_elenco, v.societario, v.rilevato_il
+                  FROM (VALUES %s) AS v (chiave, nome, cognome, comune, provincia, tipo,
+                        rete_precedente, rete_nuova, data_elenco, societario, rilevato_il)
+                 WHERE NOT EXISTS (
+                    SELECT 1 FROM ocf_movimenti m
+                     WHERE m.chiave = v.chiave AND m.data_elenco = v.data_elenco::date)
+            """, valori)
+
+        cur.execute("SELECT COUNT(*) AS n FROM ocf_movimenti")
+        scritti = (cur.fetchone()["n"] or 0) - prima
+
+        # n_cambi = quanti passaggi VERI risultano nello storico
+        cur.execute("""
+            UPDATE ocf_iscritti i SET n_cambi = s.n
+              FROM (SELECT chiave, COUNT(*) AS n FROM ocf_movimenti
+                     WHERE tipo = 'cambio_rete' AND societario IS NOT TRUE
+                     GROUP BY chiave) s
+             WHERE s.chiave = i.chiave AND i.n_cambi <> s.n
+        """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error("Storico OCF: scrittura fallita: %s", e, exc_info=True)
+        raise
+    finally:
+        cur.close()
+        conn.close()
+    return scritti
 
 
 def serve_aggiornamento(giorni: int = 7) -> bool:
@@ -424,6 +663,54 @@ def serve_aggiornamento(giorni: int = 7) -> bool:
         return False
 
 
+def mobilita_per_rete(min_consulenti: int = 200) -> list:
+    """
+    Per ogni rete: quanti consulenti ha oggi e quanti l'hanno lasciata secondo lo
+    storico dei passaggi VERI (esclusi fusioni, rinomine e giri interni al gruppo).
+
+    È la risposta operativa a "da dove conviene pescare": non tutte le reti
+    perdono persone allo stesso ritmo, e la differenza fra la più mobile e la più
+    stabile è di diverse volte.
+    """
+    db = get_db()
+    try:
+        righe = db.execute("""
+            SELECT i.rete,
+                   COUNT(DISTINCT i.chiave) AS consulenti,
+                   COALESCE(u.usciti, 0)    AS usciti,
+                   COALESCE(e.entrati, 0)   AS entrati
+              FROM ocf_iscritti i
+              LEFT JOIN (SELECT rete_precedente AS rete, COUNT(*) AS usciti
+                           FROM ocf_movimenti
+                          WHERE tipo = 'cambio_rete' AND societario IS NOT TRUE
+                          GROUP BY 1) u ON u.rete = i.rete
+              LEFT JOIN (SELECT rete_nuova AS rete, COUNT(*) AS entrati
+                           FROM ocf_movimenti
+                          WHERE tipo = 'cambio_rete' AND societario IS NOT TRUE
+                          GROUP BY 1) e ON e.rete = i.rete
+             -- Denominatore ristretto alle regioni per cui esiste storico: gli
+             -- elenchi archiviati sono troncati e coprono ~11 regioni su 22.
+             -- Senza questo vincolo le reti del Nord sembrerebbero più mobili
+             -- solo perché lì abbiamo più osservazioni.
+             WHERE i.attivo = TRUE AND COALESCE(i.rete,'') <> ''
+               AND i.regione IN (SELECT DISTINCT i2.regione FROM ocf_iscritti i2
+                                  WHERE i2.chiave IN (SELECT chiave FROM ocf_movimenti))
+             GROUP BY i.rete, u.usciti, e.entrati
+             HAVING COUNT(DISTINCT i.chiave) >= ?
+             ORDER BY COALESCE(u.usciti,0)::float / COUNT(DISTINCT i.chiave) DESC
+        """, (int(min_consulenti),)).fetchall()
+    finally:
+        db.close()
+
+    fuori = []
+    for r in righe:
+        d = dict(r)
+        d["tasso_uscita"] = round(d["usciti"] / d["consulenti"] * 100, 1) if d["consulenti"] else 0
+        d["saldo"] = d["entrati"] - d["usciti"]
+        fuori.append(d)
+    return fuori
+
+
 def statistiche() -> dict:
     """Riepilogo per la pagina Albo: copertura, ultima sincronizzazione, top reti."""
     db = get_db()
@@ -436,7 +723,8 @@ def statistiche() -> dict:
         ultima = db.execute(
             "SELECT * FROM ocf_sync ORDER BY id DESC LIMIT 1").fetchone()
         n_mov = db.execute(
-            "SELECT COUNT(*) AS n FROM ocf_movimenti WHERE tipo = 'cambio_rete'").fetchone()["n"]
+            "SELECT COUNT(*) AS n FROM ocf_movimenti "
+            "WHERE tipo = 'cambio_rete' AND societario IS NOT TRUE").fetchone()["n"]
     finally:
         db.close()
     return {"totale": tot, "reti": reti,
