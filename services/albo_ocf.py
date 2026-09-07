@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 # Quante righe per batch nell'inserimento massivo
 BATCH = 5000
 
+# Identificatore del lucchetto PostgreSQL che serializza le sincronizzazioni.
+# Serve perché in produzione gunicorn avvia più worker: ognuno ha il proprio
+# pianificatore, e senza lucchetto due processi potrebbero scaricare ed elaborare
+# lo stesso elenco nello stesso momento. Il lucchetto è di sessione: viene
+# rilasciato da solo alla chiusura della connessione, anche se il processo muore.
+LUCCHETTO_SYNC = 918273645
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Sincronizzazione
@@ -68,6 +75,14 @@ def sincronizza(elenco: str = "abilitati", zip_bytes: bytes = None) -> dict:
     conn = _get_raw_connection()
     cur = conn.cursor()
     try:
+        cur.execute("SELECT pg_try_advisory_lock(%s) AS ottenuto", (LUCCHETTO_SYNC,))
+        if not cur.fetchone()["ottenuto"]:
+            logger.info("OCF sync: un altro processo sta già sincronizzando, salto")
+            esito["errore"] = "Sincronizzazione già in corso su un altro processo."
+            cur.close()
+            conn.close()
+            return esito
+
         # 1) Staging temporanea (vive quanto la transazione)
         cur.execute("""
             CREATE TEMP TABLE ocf_stg (
@@ -183,6 +198,10 @@ def sincronizza(elenco: str = "abilitati", zip_bytes: bytes = None) -> dict:
         logger.error("OCF sync: errore in scrittura: %s", e, exc_info=True)
         esito["errore"] = f"Sincronizzazione non riuscita: {e}"
     finally:
+        try:
+            cur.execute("SELECT pg_advisory_unlock(%s)", (LUCCHETTO_SYNC,))
+        except Exception:
+            pass          # la chiusura della connessione lo rilascia comunque
         cur.close()
         conn.close()
 

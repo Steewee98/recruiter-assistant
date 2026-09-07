@@ -3,6 +3,7 @@ Recruiter Assistant — Applicazione principale Flask.
 Entry point dell'app, registra tutti i blueprint e inizializza il database.
 """
 
+import logging
 import os
 import time
 from flask import Flask, redirect, url_for, request, jsonify
@@ -22,6 +23,16 @@ from routes.albo import albo_bp, avvia_pianificatore
 
 # Carica le variabili d'ambiente dal file .env (se presente)
 load_dotenv()
+
+# Logging: senza questa configurazione il livello di default è WARNING e i
+# messaggi informativi (pianificatore dell'albo, esito delle sincronizzazioni)
+# non compaiono nei log di Railway, cioè proprio dove servono per capire se il
+# lavoro settimanale è partito.
+logging.basicConfig(
+    level=logging.DEBUG if os.environ.get("FLASK_DEBUG") == "1" else logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 # Crea l'applicazione Flask
 app = Flask(__name__)

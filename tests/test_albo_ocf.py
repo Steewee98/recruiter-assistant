@@ -392,6 +392,30 @@ def test_pianificatore_spento_in_locale():
                 os.environ[chiave] = valore
 
 
+def test_lucchetto_impedisce_sincronizzazioni_parallele():
+    """
+    In produzione gunicorn avvia piu' worker: due sincronizzazioni contemporanee
+    non devono partire. Simulato tenendo il lucchetto da un'altra connessione.
+    """
+    from database import _get_raw_connection
+    from services import albo_ocf
+
+    conn = _get_raw_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT pg_advisory_lock(%s)", (albo_ocf.LUCCHETTO_SYNC,))
+    try:
+        r = albo_ocf.sincronizza(ELENCO_TEST, zip_bytes=_zip_finto(
+            [("GINO", "TESTOTTO", "01/01/1980", "ROMA", "RM", "AZIMUT CAPITAL MANAGEMENT SGR SPA")]))
+        assert not r["ok"], "la seconda sincronizzazione non doveva procedere"
+        assert "altro processo" in (r["errore"] or "")
+    finally:
+        cur.execute("SELECT pg_advisory_unlock(%s)", (albo_ocf.LUCCHETTO_SYNC,))
+        cur.close(); conn.close()
+
+    from database import get_db
+    db = get_db(); _pulisci_test(db); db.close()
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv
