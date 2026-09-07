@@ -18,7 +18,7 @@ from routes.ricerca import ricerca_bp
 from routes.impostazioni import impostazioni_bp
 from routes.calendario import calendario_bp
 from routes.dashboard import dashboard_bp
-from routes.albo import albo_bp
+from routes.albo import albo_bp, avvia_pianificatore
 
 # Carica le variabili d'ambiente dal file .env (se presente)
 load_dotenv()
@@ -38,6 +38,10 @@ app.register_blueprint(impostazioni_bp)
 app.register_blueprint(calendario_bp)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(albo_bp)
+
+# Aggiornamento settimanale dell'albo OCF: i passaggi di rete si vedono solo
+# confrontando due elenchi, quindi una settimana non scaricata è persa per sempre.
+avvia_pianificatore()
 
 # Proteggi tutte le view con login_required (eccetto auth)
 for bp in [valutazione_bp, candidati_bp, pipeline_bp, contenuti_bp, ricerca_bp, impostazioni_bp, calendario_bp, dashboard_bp, albo_bp]:

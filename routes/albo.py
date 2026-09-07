@@ -15,7 +15,9 @@ verificati dall'Organismo, non serve un giudizio del modello per salvarli
 """
 
 import logging
+import os
 import threading
+import time
 
 from flask import Blueprint, jsonify, render_template, request
 
@@ -38,6 +40,11 @@ _sync_lock = threading.Lock()
 # abbastanza fitto da non perdere passaggi di rete, abbastanza rado da non
 # martellare il portale OCF.
 GIORNI_CADENZA = 7
+
+# Ogni quanto il pianificatore ricontrolla se è ora di aggiornare. Non è la
+# cadenza dell'aggiornamento (quella è GIORNI_CADENZA): è solo la frequenza con
+# cui si guarda l'orologio, così un riavvio di Railway non fa saltare la settimana.
+CONTROLLO_OGNI_SECONDI = 6 * 3600
 
 
 def _avvia_sync(elenco: str = "abilitati") -> bool:
@@ -78,6 +85,42 @@ def _forse_sincronizza_auto() -> bool:
     return _avvia_sync()
 
 
+def _pianificatore():
+    """
+    Tiene l'elenco aggiornato una volta a settimana senza dipendere dal fatto che
+    qualcuno apra la pagina.
+
+    Perché serve un thread e non basta il controllo all'apertura: i passaggi di
+    rete esistono solo come differenza fra due elenchi, e una settimana saltata
+    è persa per sempre. Se nessuno entra nell'app per dieci giorni, quei dieci
+    giorni di movimenti non si recuperano più.
+    """
+    while True:
+        try:
+            if albo_ocf.serve_aggiornamento(GIORNI_CADENZA):
+                log.info("Pianificatore albo: avvio aggiornamento settimanale")
+                _avvia_sync()
+        except Exception as e:  # pragma: no cover — il thread non deve mai morire
+            log.warning("Pianificatore albo: %s", e)
+        time.sleep(CONTROLLO_OGNI_SECONDI)
+
+
+def avvia_pianificatore() -> bool:
+    """
+    Attiva il pianificatore. Spento di default in locale: non vogliamo che un
+    test o una sessione di sviluppo scarichino 56.000 righe. In produzione si
+    accende da solo (Railway espone RAILWAY_ENVIRONMENT), oppure si forza con
+    ALBO_SYNC_AUTO=1.
+    """
+    attivo = os.environ.get("ALBO_SYNC_AUTO") == "1" or bool(os.environ.get("RAILWAY_ENVIRONMENT"))
+    if not attivo:
+        return False
+    threading.Thread(target=_pianificatore, daemon=True, name="albo-sync").start()
+    log.info("Pianificatore albo attivo: controllo ogni %d ore, cadenza %d giorni",
+             CONTROLLO_OGNI_SECONDI // 3600, GIORNI_CADENZA)
+    return True
+
+
 @albo_bp.route("/albo")
 @login_required
 def index():
@@ -85,10 +128,28 @@ def index():
     stats = albo_ocf.statistiche()
     # 1826 giorni ≈ 5 anni: lo storico ricostruito parte dal 2022
     ultimi_movimenti = albo_ocf.movimenti(tipo="cambio_rete", giorni=1826, limite=50)
+    # Solo il caso che serve a questo ufficio: gruppi ENTRATI in Fideuram sulla
+    # piazza di Roma. Il valore operativo non è il gruppo (già nostro) ma i
+    # colleghi rimasti nella banca di partenza.
+    squadre = albo_ocf.squadre_in_movimento(
+        min_persone=2, limite=25, verso=albo_ocf.RETE_PROPRIA,
+        solo_provincia=albo_ocf.PROVINCIA_OPERATIVA)
+    nuove = albo_ocf.squadre_in_movimento(
+        min_persone=2, limite=25, verso=albo_ocf.RETE_PROPRIA,
+        solo_provincia=albo_ocf.PROVINCIA_OPERATIVA, solo_non_viste=True)
     return render_template("albo.html", stats=stats, movimenti=ultimi_movimenti,
-                           squadre=albo_ocf.squadre_in_movimento(
-                               min_persone=2, limite=25, solo_rete=albo_ocf.RETE_PROPRIA),
+                           squadre=squadre, squadre_nuove=nuove,
+                           provincia=albo_ocf.PROVINCIA_OPERATIVA,
                            sync_in_corso=_sync_stato["in_corso"])
+
+
+@albo_bp.route("/albo/squadre-viste", methods=["POST"])
+@login_required
+def squadre_viste():
+    """Archivia la segnalazione: le squadre già lette non ricompaiono in evidenza."""
+    n = albo_ocf.segna_squadre_viste(provincia=albo_ocf.PROVINCIA_OPERATIVA,
+                                     verso=albo_ocf.RETE_PROPRIA)
+    return jsonify({"ok": True, "archiviati": n})
 
 
 @albo_bp.route("/albo/storico", methods=["POST"])

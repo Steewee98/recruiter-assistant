@@ -262,6 +262,10 @@ def _registra_sync(esito: dict) -> None:
 # mandato. Usato quando il chiamante non specifica una rete.
 RETE_PROPRIA = "Fideuram"
 
+# Provincia su cui SABIA lavora davvero. Le squadre in movimento vengono filtrate
+# qui: un gruppo che passa a Fideuram a Torino non è azionabile da questo ufficio.
+PROVINCIA_OPERATIVA = "RM"
+
 
 def _ordina_per_propensione():
     """
@@ -720,10 +724,18 @@ def serve_aggiornamento(giorni: int = 7) -> bool:
 
 
 def squadre_in_movimento(min_persone: int = 2, giorni: int = 1826, limite: int = 40,
-                         solo_rete: str = "", max_finestra: int = None) -> list:
+                         solo_rete: str = "", max_finestra: int = None,
+                         verso: str = "", solo_provincia: str = "",
+                         solo_non_viste: bool = False) -> list:
     """
     Grappoli di passaggi: più consulenti della STESSA rete e della STESSA provincia
     che nella stessa finestra sono andati alla STESSA destinazione.
+
+    `verso` e `solo_provincia` restringono al caso che interessa davvero qui: un
+    gruppo che ENTRA in Fideuram sulla piazza di Roma. Il valore non è il gruppo
+    in sé (quelle persone sono già nostre) ma i colleghi che si è lasciato dietro
+    nella banca di partenza: sono raggiungibili con un motivo concreto e sono
+    dello stesso giro di chi se n'è appena andato.
 
     Non è un caso: negli elenchi 2022 i passaggi a grappolo sono fino a 12 volte
     più frequenti di quanto sarebbero se ognuno scegliesse per conto suo. È la
@@ -745,13 +757,17 @@ def squadre_in_movimento(min_persone: int = 2, giorni: int = 1826, limite: int =
                AND rilevato_il >= CURRENT_DATE - CAST(? AS INTEGER)
                AND COALESCE(provincia, '') <> ''
                AND (? = '' OR rete_precedente = ? OR rete_nuova = ?)
+               AND (? = '' OR rete_nuova = ?)
+               AND (? = '' OR provincia = ?)
+               AND (NOT ? OR visto IS NOT TRUE)
                AND (CAST(? AS INTEGER) IS NULL
                     OR COALESCE(finestra_giorni, 99999) <= CAST(? AS INTEGER))
              GROUP BY rete_precedente, rete_nuova, provincia, data_elenco
             HAVING COUNT(*) >= ?
              ORDER BY COUNT(*) DESC, data_elenco DESC
              LIMIT ?
-        """, (int(giorni), solo_rete, solo_rete, solo_rete,
+        """, (int(giorni), solo_rete, solo_rete, solo_rete, verso, verso,
+              solo_provincia, solo_provincia, bool(solo_non_viste),
               max_finestra, max_finestra, int(min_persone), int(limite))).fetchall()
     finally:
         db.close()
@@ -767,6 +783,22 @@ def squadre_in_movimento(min_persone: int = 2, giorni: int = 1826, limite: int =
         d["in_corso"] = bool(f and f <= 60)
         squadre.append(d)
     return squadre
+
+
+def segna_squadre_viste(provincia: str = "", verso: str = "") -> int:
+    """Marca come già visti i passaggi delle squadre segnalate."""
+    db = get_db()
+    try:
+        cur = db.execute("""
+            UPDATE ocf_movimenti SET visto = TRUE
+             WHERE tipo = 'cambio_rete' AND societario IS NOT TRUE
+               AND visto IS NOT TRUE
+               AND (? = '' OR rete_nuova = ?) AND (? = '' OR provincia = ?)
+        """, (verso, verso, provincia, provincia))
+        db.commit()
+        return getattr(cur, "rowcount", 0) or 0
+    finally:
+        db.close()
 
 
 def _conta_colleghi(rete: str, provincia: str) -> int:

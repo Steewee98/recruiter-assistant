@@ -105,26 +105,40 @@
 </div>
 
 <!-- ===== Squadre in movimento ===== -->
+{% if squadre_nuove %}
+<div class="card" style="margin-top:1.5rem;border-left:4px solid #b45309;">
+    <div class="card-body">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
+            <div>
+                <strong style="color:#b45309;">&#9679; {{ squadre_nuove|length }} nuova/e squadra/e rilevata/e</strong>
+                <div style="font-size:0.85rem;color:var(--grigio-testo);margin-top:0.2rem;">
+                    {% for s in squadre_nuove %}{{ s.persone }} da {{ s.rete_precedente }}{% if not loop.last %} · {% endif %}{% endfor %}
+                    — dall'ultimo aggiornamento dell'albo.
+                </div>
+            </div>
+            <button class="btn btn-secondary" onclick="archiviaSegnalazione(this)">Ho visto</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <div class="card" style="margin-top:1.5rem;">
-    <div class="card-header"><h3>Squadre in movimento</h3></div>
+    <div class="card-header"><h3>Squadre entrate in Fideuram &mdash; {{ provincia }}</h3></div>
     <div class="card-body">
         <p style="font-size:0.85rem;color:var(--grigio-testo);margin:0 0 1rem;">
-            Gruppi che si muovono <strong>da o verso Fideuram</strong>: più consulenti della stessa
-            rete e provincia passati insieme alla stessa destinazione. Non è casualità — negli
-            elenchi storici i passaggi a grappolo sono fino a <strong>12 volte</strong> più frequenti
-            di quanto sarebbero se ognuno scegliesse da solo: è la firma del gruppo che segue il
-            proprio responsabile.
+            Gruppi passati <strong>in Fideuram</strong> sulla piazza di <strong>{{ provincia }}</strong>.
+            Non è casualità: negli elenchi storici i passaggi a grappolo sono fino a
+            <strong>12 volte</strong> più frequenti di quanto sarebbero se ognuno scegliesse da solo
+            — è la firma del gruppo che segue il proprio responsabile.
+            Quello che conta qui non è il gruppo (quelle persone sono già nostre) ma
+            <strong>chi si è lasciato dietro</strong> nella banca di partenza: stesso giro, stessa
+            zona, e un motivo concreto per chiamarli.
         </p>
         {% if squadre %}
         {% for s in squadre %}
         <div style="border:1px solid var(--bordo,#e2e8f0);border-radius:12px;padding:0.9rem 1.1rem;margin-bottom:0.7rem;">
             <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;">
                 <div>
-                    {% if s.verso_di_noi %}
-                    <span style="font-size:0.72rem;background:#dcfce7;color:#166534;padding:2px 8px;border-radius:10px;">verso di noi</span>
-                    {% else %}
-                    <span style="font-size:0.72rem;background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:10px;">in uscita da Fideuram</span>
-                    {% endif %}
                     <span style="font-weight:700;color:var(--blu-scuro);font-size:1.05rem;">{{ s.persone }} persone</span>
                     <span style="color:var(--grigio-testo);"> · {{ s.rete_precedente }} &rarr; <strong>{{ s.rete_nuova }}</strong></span>
                     <span style="color:var(--grigio-testo);"> · {{ s.provincia }}</span>
@@ -163,7 +177,9 @@
         </p>
         {% else %}
         <p style="color:var(--grigio-testo);font-size:0.9rem;margin:0;">
-            Nessuna squadra rilevata: serve lo storico dei passaggi (pulsante «Ricostruisci lo storico»).
+            Nessun gruppo entrato in Fideuram a {{ provincia }}. Se lo storico non è mai stato
+            ricostruito, premi «Ricostruisci lo storico»; altrimenti significa che nell'ultimo
+            periodo non ci sono stati ingressi di gruppo su questa piazza.
         </p>
         {% endif %}
     </div>
@@ -408,6 +424,13 @@ async function importaColleghi(btn) {
     })).json();
     btn.insertAdjacentHTML('afterend', '<div style="font-size:0.82rem;margin-top:0.4rem;">'
         + (d.ok ? 'Importati ' + d.inseriti + (d.saltati ? ' · ' + d.saltati + ' già presenti' : '') : esc(d.errore || 'Errore')) + '</div>');
+}
+
+async function archiviaSegnalazione(btn) {
+    btn.disabled = true;
+    await fetch('/albo/squadre-viste', {method: 'POST'});
+    var card = btn.closest('.card');
+    if (card) card.remove();
 }
 
 function esc(s) {

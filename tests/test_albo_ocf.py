@@ -349,6 +349,49 @@ def test_squadre_filtrate_su_una_rete():
         assert "verso_di_noi" in s and "in_corso" in s
 
 
+def test_squadre_solo_entrate_e_solo_provincia_operativa():
+    """
+    Il filtro operativo: solo gruppi ENTRATI in Fideuram e solo sulla piazza di
+    Roma. Un gruppo uscito da Fideuram, o entrato ma a Milano, non deve comparire.
+    """
+    from services import albo_ocf
+    sq = albo_ocf.squadre_in_movimento(
+        min_persone=2, limite=50, verso=albo_ocf.RETE_PROPRIA,
+        solo_provincia=albo_ocf.PROVINCIA_OPERATIVA)
+    assert sq, "ci si aspetta almeno un gruppo entrato in Fideuram a Roma"
+    for s in sq:
+        assert s["rete_nuova"] == albo_ocf.RETE_PROPRIA, s
+        assert s["provincia"] == albo_ocf.PROVINCIA_OPERATIVA, s
+        assert s["rete_precedente"] != albo_ocf.RETE_PROPRIA
+
+
+def test_segnalazione_si_archivia():
+    """Una volta letta, la segnalazione non deve ripresentarsi."""
+    from services import albo_ocf
+    albo_ocf.segna_squadre_viste(provincia=albo_ocf.PROVINCIA_OPERATIVA,
+                                 verso=albo_ocf.RETE_PROPRIA)
+    residue = albo_ocf.squadre_in_movimento(
+        min_persone=2, limite=50, verso=albo_ocf.RETE_PROPRIA,
+        solo_provincia=albo_ocf.PROVINCIA_OPERATIVA, solo_non_viste=True)
+    assert residue == [], f"restano {len(residue)} segnalazioni non archiviate"
+
+
+def test_pianificatore_spento_in_locale():
+    """In sviluppo il pianificatore non deve partire da solo e scaricare 56.000 righe."""
+    import os
+    from routes import albo
+    vecchi = (os.environ.pop("ALBO_SYNC_AUTO", None), os.environ.pop("RAILWAY_ENVIRONMENT", None))
+    try:
+        assert albo.avvia_pianificatore() is False
+        os.environ["ALBO_SYNC_AUTO"] = "1"
+        assert albo.avvia_pianificatore() is True
+    finally:
+        os.environ.pop("ALBO_SYNC_AUTO", None)
+        for chiave, valore in zip(("ALBO_SYNC_AUTO", "RAILWAY_ENVIRONMENT"), vecchi):
+            if valore is not None:
+                os.environ[chiave] = valore
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv
