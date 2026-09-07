@@ -86,7 +86,7 @@ def index():
     # 1826 giorni ≈ 5 anni: lo storico ricostruito parte dal 2022
     ultimi_movimenti = albo_ocf.movimenti(tipo="cambio_rete", giorni=1826, limite=50)
     return render_template("albo.html", stats=stats, movimenti=ultimi_movimenti,
-                           mobilita=albo_ocf.mobilita_per_rete(200)[:15],
+                           squadre=albo_ocf.squadre_in_movimento(min_persone=2, limite=25),
                            sync_in_corso=_sync_stato["in_corso"])
 
 
@@ -221,6 +221,17 @@ def importa():
         db.close()
 
     return jsonify({"ok": True, "inseriti": inseriti, "saltati": saltati})
+
+
+@albo_bp.route("/albo/colleghi", methods=["POST"])
+@login_required
+def colleghi():
+    """Chi è ancora nella rete che ha appena perso una squadra, stessa provincia."""
+    d = request.get_json() or {}
+    rete, provincia = (d.get("rete") or "").strip(), (d.get("provincia") or "").strip()
+    if not rete or not provincia:
+        return jsonify({"errore": "Servono rete e provincia."}), 400
+    return jsonify(albo_ocf.colleghi_rimasti(rete, provincia))
 
 
 @albo_bp.route("/albo/movimenti")

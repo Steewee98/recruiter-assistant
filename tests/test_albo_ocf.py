@@ -264,6 +264,39 @@ def test_zip_troncato_recupera_le_voci_intere():
     assert len(recuperati["LAZIO_CFAB.csv"].splitlines()) == 50
 
 
+def test_squadra_rilevata_e_colleghi_esclusi():
+    """
+    Tre consulenti della stessa rete e provincia che passano insieme alla stessa
+    destinazione = una squadra. Chi è già andato via non deve comparire fra i
+    colleghi rimasti.
+    """
+    from database import get_db
+    from services import albo_ocf
+    db = get_db()
+    _pulisci_test(db)
+    prima = [("UNO", "SQUADRAA", "01/01/1980", "ROMA", "RM", "AZIMUT CAPITAL MANAGEMENT SGR SPA"),
+             ("DUE", "SQUADRAB", "02/01/1980", "ROMA", "RM", "AZIMUT CAPITAL MANAGEMENT SGR SPA"),
+             ("TRE", "SQUADRAC", "03/01/1980", "ROMA", "RM", "AZIMUT CAPITAL MANAGEMENT SGR SPA"),
+             ("QUATTRO", "RESTAQUI", "04/01/1980", "ROMA", "RM", "AZIMUT CAPITAL MANAGEMENT SGR SPA")]
+    albo_ocf.sincronizza(ELENCO_TEST, zip_bytes=_zip_finto(prima))
+    dopo = [(n, c, d, l, pr, "BANCA GENERALI SPA" if c != "RESTAQUI" else s)
+            for n, c, d, l, pr, s in prima]
+    albo_ocf.sincronizza(ELENCO_TEST, zip_bytes=_zip_finto(dopo, data_testo="10 ottobre 2026"))
+
+    sq = [x for x in albo_ocf.squadre_in_movimento(min_persone=2, giorni=2, limite=50)
+          if x["rete_precedente"] == "Azimut" and x["rete_nuova"] == "Banca Generali"
+          and x["provincia"] == "RM"]
+    assert sq, "la squadra doveva essere rilevata"
+    assert sq[0]["persone"] >= 3, sq[0]["persone"]
+
+    rimasti = albo_ocf.colleghi_rimasti("Azimut", "RM")
+    cognomi = {p["cognome"] for p in rimasti["profili"]}
+    assert "Squadraa" not in cognomi, "chi si è già mosso non è un collega rimasto"
+
+    _pulisci_test(db)
+    db.close()
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv

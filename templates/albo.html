@@ -104,38 +104,49 @@
     </div>
 </div>
 
-<!-- ===== Dove conviene pescare ===== -->
+<!-- ===== Squadre in movimento ===== -->
 <div class="card" style="margin-top:1.5rem;">
-    <div class="card-header"><h3>Da quali reti si esce di più</h3></div>
+    <div class="card-header"><h3>Squadre in movimento</h3></div>
     <div class="card-body">
-        {% if mobilita %}
-        <p style="font-size:0.85rem;color:var(--grigio-testo);margin:0 0 0.8rem;">
-            Passaggi <strong>individuali</strong> osservati negli elenchi ufficiali dal 2022 a oggi.
-            Fusioni, cambi di ragione sociale e spostamenti interni allo stesso gruppo bancario
-            sono esclusi: non sono scelte delle persone. Il denominatore è limitato alle regioni
-            per cui esiste storico.
+        <p style="font-size:0.85rem;color:var(--grigio-testo);margin:0 0 1rem;">
+            Più consulenti della stessa rete e della stessa provincia passati insieme alla stessa
+            destinazione. Non è casualità: negli elenchi storici i passaggi a grappolo arrivano a
+            essere <strong>12 volte</strong> più frequenti di quanto sarebbero se ognuno scegliesse
+            da solo. È la firma del gruppo che segue il proprio responsabile.
         </p>
-        <table class="table">
-            <thead><tr><th>Rete</th><th>Consulenti</th><th>Usciti</th><th>Entrati</th>
-                       <th>Tasso di uscita</th><th>Saldo</th></tr></thead>
-            <tbody>
-            {% for r in mobilita %}
-                <tr>
-                    <td><strong>{{ r.rete }}</strong></td>
-                    <td>{{ r.consulenti }}</td>
-                    <td>{{ r.usciti }}</td>
-                    <td>{{ r.entrati }}</td>
-                    <td><strong>{{ r.tasso_uscita }}%</strong></td>
-                    <td style="color:{% if r.saldo < 0 %}#dc2626{% else %}#166534{% endif %};">
-                        {{ '%+d'|format(r.saldo) }}
-                    </td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
+        {% if squadre %}
+        {% for s in squadre %}
+        <div style="border:1px solid var(--bordo,#e2e8f0);border-radius:12px;padding:0.9rem 1.1rem;margin-bottom:0.7rem;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;">
+                <div>
+                    <span style="font-weight:700;color:var(--blu-scuro);font-size:1.05rem;">{{ s.persone }} persone</span>
+                    <span style="color:var(--grigio-testo);"> · {{ s.rete_precedente }} &rarr; <strong>{{ s.rete_nuova }}</strong></span>
+                    <span style="color:var(--grigio-testo);"> · {{ s.provincia }}</span>
+                </div>
+                <div style="font-size:0.8rem;color:var(--grigio-testo);">rilevato {{ (s.data_elenco or '')|string|truncate(10, true, '') }}</div>
+            </div>
+            <div style="font-size:0.85rem;color:var(--grigio-testo);margin:0.4rem 0 0.6rem;">{{ s.nomi }}</div>
+            {% if s.colleghi_rimasti %}
+            <button class="btn btn-secondary" style="font-size:0.82rem;padding:0.35rem 0.8rem;"
+                    onclick="mostraColleghi(this, {{ s.rete_precedente|tojson }}, {{ s.provincia|tojson }})">
+                Chi è rimasto in {{ s.rete_precedente }} ({{ s.provincia }}): {{ s.colleghi_rimasti }} &rarr;
+            </button>
+            <div class="colleghi" style="margin-top:0.7rem;"></div>
+            {% else %}
+            <div style="font-size:0.82rem;color:var(--grigio-testo);">Nessun collega rimasto in provincia: la squadra se n'è andata tutta.</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+        <p style="font-size:0.8rem;color:#b45309;margin:0.8rem 0 0;">
+            Attenzione a come si legge: i dati mostrano che una squadra si muove <strong>insieme</strong>,
+            nella stessa finestra — non a scaglioni. Che i colleghi rimasti seguano più tardi
+            <strong>non risulta dai numeri</strong> (misure troppo poche e discordi). Quindi questa
+            lista vale come occasione di contatto con un motivo concreto e va lavorata subito, non
+            come previsione.
+        </p>
         {% else %}
         <p style="color:var(--grigio-testo);font-size:0.9rem;margin:0;">
-            Serve lo storico dei passaggi: premi «Ricostruisci lo storico».
+            Nessuna squadra rilevata: serve lo storico dei passaggi (pulsante «Ricostruisci lo storico»).
         </p>
         {% endif %}
     </div>
@@ -336,6 +347,43 @@ async function importaSelezionati() {
     } else {
         stato.textContent = d.errore || 'Import non riuscito.';
     }
+}
+
+// Colleghi ancora nella rete che ha perso la squadra
+async function mostraColleghi(btn, rete, provincia) {
+    var box = btn.parentElement.querySelector('.colleghi');
+    if (box.dataset.aperto === '1') { box.innerHTML = ''; box.dataset.aperto = '0'; return; }
+    box.innerHTML = '<span class="spinner"></span> Carico…';
+    box.dataset.aperto = '1';
+    var d = await (await fetch('/albo/colleghi', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({rete: rete, provincia: provincia})
+    })).json();
+    if (!d.profili || !d.profili.length) { box.innerHTML = '<em>Nessuno.</em>'; return; }
+    box.innerHTML = '<table class="table"><thead><tr><th></th><th>Consulente</th><th>Comune</th><th>Età</th></tr></thead><tbody>'
+        + d.profili.map(function (p, i) {
+            return '<tr><td><input type="checkbox" class="sel-coll" data-i="' + i + '"></td>'
+                 + '<td><strong>' + esc(p.nome_completo) + '</strong></td>'
+                 + '<td>' + esc(p.comune || '') + '</td>'
+                 + '<td>' + (p.eta ? p.eta + ' anni' : '—') + '</td></tr>';
+        }).join('') + '</tbody></table>'
+        + '<button class="btn btn-primary" style="font-size:0.82rem;" onclick="importaColleghi(this)">Importa i selezionati in pipeline</button>';
+    box._profili = d.profili;
+}
+
+async function importaColleghi(btn) {
+    var box = btn.parentElement;
+    var scelti = [];
+    box.querySelectorAll('.sel-coll:checked').forEach(function (c) {
+        scelti.push(box._profili[parseInt(c.dataset.i, 10)]);
+    });
+    if (!scelti.length) { alert('Seleziona almeno un consulente.'); return; }
+    var d = await (await fetch('/albo/importa', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({profili: scelti})
+    })).json();
+    btn.insertAdjacentHTML('afterend', '<div style="font-size:0.82rem;margin-top:0.4rem;">'
+        + (d.ok ? 'Importati ' + d.inseriti + (d.saltati ? ' · ' + d.saltati + ' già presenti' : '') : esc(d.errore || 'Errore')) + '</div>');
 }
 
 function esc(s) {

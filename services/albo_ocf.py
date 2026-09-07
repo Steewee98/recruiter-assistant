@@ -663,6 +663,95 @@ def serve_aggiornamento(giorni: int = 7) -> bool:
         return False
 
 
+def squadre_in_movimento(min_persone: int = 2, giorni: int = 1826, limite: int = 40) -> list:
+    """
+    Grappoli di passaggi: più consulenti della STESSA rete e della STESSA provincia
+    che nella stessa finestra sono andati alla STESSA destinazione.
+
+    Non è un caso: negli elenchi 2022 i passaggi a grappolo sono fino a 12 volte
+    più frequenti di quanto sarebbero se ognuno scegliesse per conto suo. È la
+    firma del gruppo che segue il proprio responsabile.
+
+    Per ogni squadra restituisce anche `colleghi_rimasti`: quante persone della
+    stessa rete e zona sono ancora lì. Sono i nomi da chiamare — con l'avvertenza
+    che i dati NON dimostrano che seguano (vedi `colleghi_rimasti()`).
+    """
+    db = get_db()
+    try:
+        righe = db.execute("""
+            SELECT rete_precedente, rete_nuova, provincia, data_elenco,
+                   COUNT(*) AS persone,
+                   STRING_AGG(nome || ' ' || cognome, ' · ' ORDER BY cognome) AS nomi,
+                   STRING_AGG(DISTINCT comune, ', ')                          AS comuni
+              FROM ocf_movimenti
+             WHERE tipo = 'cambio_rete' AND societario IS NOT TRUE
+               AND rilevato_il >= CURRENT_DATE - CAST(? AS INTEGER)
+               AND COALESCE(provincia, '') <> ''
+             GROUP BY rete_precedente, rete_nuova, provincia, data_elenco
+            HAVING COUNT(*) >= ?
+             ORDER BY COUNT(*) DESC, data_elenco DESC
+             LIMIT ?
+        """, (int(giorni), int(min_persone), int(limite))).fetchall()
+    finally:
+        db.close()
+
+    squadre = []
+    for r in righe:
+        d = dict(r)
+        d["colleghi_rimasti"] = _conta_colleghi(d["rete_precedente"], d["provincia"])
+        squadre.append(d)
+    return squadre
+
+
+def _conta_colleghi(rete: str, provincia: str) -> int:
+    db = get_db()
+    try:
+        r = db.execute(
+            "SELECT COUNT(*) AS n FROM ocf_iscritti "
+            "WHERE attivo = TRUE AND rete = ? AND provincia = ?",
+            (rete, provincia)).fetchone()
+    finally:
+        db.close()
+    return (r or {}).get("n", 0)
+
+
+def colleghi_rimasti(rete: str, provincia: str, limite: int = 200) -> dict:
+    """
+    Chi è ancora nella rete che ha appena perso un gruppo, nella stessa provincia.
+
+    ⚠️ Onestà sul segnale: sugli elenchi 2022 il fatto che ≥2 colleghi se ne siano
+    andati NON risulta predire in modo affidabile che gli altri li seguano
+    (lift misurati: 1,1x · 3,6x · 0,0x su pochissimi eventi = rumore). Quello che i
+    dati mostrano con forza è che la squadra si muove INSIEME, nella stessa
+    finestra — non a scaglioni. Quindi questa lista va lavorata SUBITO dopo la
+    rilevazione, non fra tre mesi, e va presa come "occasione di contatto con un
+    motivo concreto", non come previsione.
+    """
+    db = get_db()
+    try:
+        mossi = {r["chiave"] for r in db.execute(
+            "SELECT chiave FROM ocf_movimenti WHERE tipo = 'cambio_rete'").fetchall()}
+        righe = db.execute("""
+            SELECT chiave, nome, cognome, anno_nascita, comune, provincia, rete, n_cambi
+              FROM ocf_iscritti
+             WHERE attivo = TRUE AND rete = ? AND provincia = ?
+             ORDER BY comune, cognome LIMIT ?
+        """, (rete, provincia, int(limite))).fetchall()
+    finally:
+        db.close()
+
+    anno = date.today().year
+    profili = []
+    for r in righe:
+        d = dict(r)
+        if d["chiave"] in mossi:
+            continue
+        d["eta"] = (anno - d["anno_nascita"]) if d.get("anno_nascita") else None
+        d["nome_completo"] = f"{d.get('nome','')} {d.get('cognome','')}".strip()
+        profili.append(d)
+    return {"totale": len(profili), "profili": profili}
+
+
 def mobilita_per_rete(min_consulenti: int = 200) -> list:
     """
     Per ogni rete: quanti consulenti ha oggi e quanti l'hanno lasciata secondo lo
