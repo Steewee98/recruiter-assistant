@@ -34,10 +34,54 @@ albo_bp = Blueprint("albo", __name__)
 _sync_stato = {"in_corso": False, "esito": None}
 _sync_lock = threading.Lock()
 
+# Ogni quanti giorni riscaricare l'elenco ufficiale. Sette è un compromesso:
+# abbastanza fitto da non perdere passaggi di rete, abbastanza rado da non
+# martellare il portale OCF.
+GIORNI_CADENZA = 7
+
+
+def _avvia_sync(elenco: str = "abilitati") -> bool:
+    """Avvia la sincronizzazione in un thread. False se ce n'è già una in corso."""
+    with _sync_lock:
+        if _sync_stato["in_corso"]:
+            return False
+        _sync_stato["in_corso"] = True
+        _sync_stato["esito"] = None
+
+    def _lavora():
+        try:
+            esito = albo_ocf.sincronizza(elenco)
+        except Exception as e:  # pragma: no cover — la sync cattura già da sé
+            log.error("Sync albo fallita: %s", e, exc_info=True)
+            esito = {"ok": False, "errore": str(e)}
+        with _sync_lock:
+            _sync_stato["esito"] = esito
+            _sync_stato["in_corso"] = False
+
+    threading.Thread(target=_lavora, daemon=True).start()
+    return True
+
+
+def _forse_sincronizza_auto() -> bool:
+    """
+    Se l'ultimo aggiornamento riuscito ha più di GIORNI_CADENZA giorni, ne avvia
+    uno in background.
+
+    Perché automatico: i passaggi di rete esistono solo come DIFFERENZA fra due
+    elenchi. Saltare le sincronizzazioni non è un ritardo, è perdita definitiva
+    di dati — i movimenti avvenuti nel mezzo non sono più ricostruibili, e sono
+    le etichette su cui si potrà addestrare qualunque modello di propensione.
+    """
+    if not albo_ocf.serve_aggiornamento(GIORNI_CADENZA):
+        return False
+    log.info("Albo OCF: ultimo aggiornamento oltre %d giorni, sincronizzo", GIORNI_CADENZA)
+    return _avvia_sync()
+
 
 @albo_bp.route("/albo")
 @login_required
 def index():
+    _forse_sincronizza_auto()
     stats = albo_ocf.statistiche()
     ultimi_movimenti = albo_ocf.movimenti(tipo="cambio_rete", giorni=365, limite=50)
     return render_template("albo.html", stats=stats, movimenti=ultimi_movimenti,
@@ -52,23 +96,8 @@ def sincronizza():
     56.000 righe richiedono più del tempo di una richiesta HTTP.
     """
     elenco = (request.get_json() or {}).get("elenco", "abilitati")
-    with _sync_lock:
-        if _sync_stato["in_corso"]:
-            return jsonify({"ok": False, "errore": "Una sincronizzazione è già in corso."}), 409
-        _sync_stato["in_corso"] = True
-        _sync_stato["esito"] = None
-
-    def _lavora():
-        try:
-            esito = albo_ocf.sincronizza(elenco)
-        except Exception as e:  # pragma: no cover — la sync già cattura da sé
-            log.error("Sync albo fallita: %s", e, exc_info=True)
-            esito = {"ok": False, "errore": str(e)}
-        with _sync_lock:
-            _sync_stato["esito"] = esito
-            _sync_stato["in_corso"] = False
-
-    threading.Thread(target=_lavora, daemon=True).start()
+    if not _avvia_sync(elenco):
+        return jsonify({"ok": False, "errore": "Una sincronizzazione è già in corso."}), 409
     return jsonify({"ok": True, "avviata": True})
 
 

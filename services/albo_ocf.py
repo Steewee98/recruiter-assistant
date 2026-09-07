@@ -397,6 +397,33 @@ def movimenti(tipo: str = "", giorni: int = 90, rete: str = "", provincia: str =
     return [dict(r) for r in righe]
 
 
+def serve_aggiornamento(giorni: int = 7) -> bool:
+    """
+    True se l'ultimo aggiornamento RIUSCITO è più vecchio di `giorni`
+    (o se non ce n'è mai stato uno).
+    """
+    db = get_db()
+    try:
+        r = db.execute(
+            """SELECT MAX(eseguito_il) AS ultimo FROM ocf_sync
+                WHERE esito = 'ok' AND elenco = 'abilitati'"""
+        ).fetchone()
+    except Exception:
+        return False   # nel dubbio non scarichiamo nulla
+    finally:
+        db.close()
+
+    ultimo = (r or {}).get("ultimo")
+    if not ultimo:
+        return True
+    try:
+        giorno = str(ultimo)[:10]
+        anno, mese, gg = (int(x) for x in giorno.split("-"))
+        return (date.today() - date(anno, mese, gg)).days >= giorni
+    except Exception:
+        return False
+
+
 def statistiche() -> dict:
     """Riepilogo per la pagina Albo: copertura, ultima sincronizzazione, top reti."""
     db = get_db()
