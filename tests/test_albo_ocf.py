@@ -297,6 +297,58 @@ def test_squadra_rilevata_e_colleghi_esclusi():
     db.close()
 
 
+# ── Coefficiente di propensione ──────────────────────────────────────────────
+
+def test_coefficiente_ordina_le_reti_come_i_dati():
+    """Una rete da cui si esce molto deve dare un coefficiente più alto di una stabile."""
+    from services import propensione
+    par = {"pronto": True, "base": 0.07,
+           "reti": {"ReteMobile": {"tasso": 0.15, "osservati": 800, "mossi": 120},
+                    "ReteStabile": {"tasso": 0.03, "osservati": 900, "mossi": 27}},
+           "eta": {}}
+    a = propensione.coefficiente("ReteMobile", 45, par)
+    b = propensione.coefficiente("ReteStabile", 45, par)
+    assert a["indice"] > b["indice"] * 2, (a["indice"], b["indice"])
+    assert a["perche"], "il coefficiente deve dire perché"
+
+
+def test_coefficiente_applica_letà():
+    """A parità di rete, gli over 65 devono risultare meno propensi dei giovani."""
+    from services import propensione
+    par = {"pronto": True, "base": 0.07,
+           "reti": {"R": {"tasso": 0.10, "osservati": 500, "mossi": 50}}, "eta": {}}
+    giovane = propensione.coefficiente("R", 30, par)["indice"]
+    anziano = propensione.coefficiente("R", 70, par)["indice"]
+    assert giovane > anziano, (giovane, anziano)
+    assert propensione.fascia_eta(None) == "sconosciuta"
+    assert propensione.coefficiente("R", None, par)["indice"] > 0
+
+
+def test_rete_sconosciuta_usa_la_media():
+    from services import propensione
+    par = {"pronto": True, "base": 0.07, "reti": {}, "eta": {}}
+    c = propensione.coefficiente("Banca Mai Vista", 45, par)
+    assert c["disponibile"] and abs(c["indice"] - 1.01) < 0.05, c["indice"]
+    assert "media di mercato" in " ".join(c["perche"])
+
+
+def test_coefficiente_degrada_senza_parametri():
+    """Senza storico il coefficiente si dichiara non disponibile, non inventa numeri."""
+    from services import propensione
+    c = propensione.coefficiente("Azimut", 40, {"pronto": False, "motivo": "niente storico"})
+    assert c["disponibile"] is False and c["motivo"]
+
+
+def test_squadre_filtrate_su_una_rete():
+    """Il filtro per rete deve tenere sia le squadre in entrata sia quelle in uscita."""
+    from services import albo_ocf
+    sq = albo_ocf.squadre_in_movimento(min_persone=2, limite=50,
+                                       solo_rete=albo_ocf.RETE_PROPRIA)
+    for s in sq:
+        assert albo_ocf.RETE_PROPRIA in (s["rete_precedente"], s["rete_nuova"]), s
+        assert "verso_di_noi" in s and "in_corso" in s
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv

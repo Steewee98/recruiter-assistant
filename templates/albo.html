@@ -109,21 +109,33 @@
     <div class="card-header"><h3>Squadre in movimento</h3></div>
     <div class="card-body">
         <p style="font-size:0.85rem;color:var(--grigio-testo);margin:0 0 1rem;">
-            Più consulenti della stessa rete e della stessa provincia passati insieme alla stessa
-            destinazione. Non è casualità: negli elenchi storici i passaggi a grappolo arrivano a
-            essere <strong>12 volte</strong> più frequenti di quanto sarebbero se ognuno scegliesse
-            da solo. È la firma del gruppo che segue il proprio responsabile.
+            Gruppi che si muovono <strong>da o verso Fideuram</strong>: più consulenti della stessa
+            rete e provincia passati insieme alla stessa destinazione. Non è casualità — negli
+            elenchi storici i passaggi a grappolo sono fino a <strong>12 volte</strong> più frequenti
+            di quanto sarebbero se ognuno scegliesse da solo: è la firma del gruppo che segue il
+            proprio responsabile.
         </p>
         {% if squadre %}
         {% for s in squadre %}
         <div style="border:1px solid var(--bordo,#e2e8f0);border-radius:12px;padding:0.9rem 1.1rem;margin-bottom:0.7rem;">
             <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;">
                 <div>
+                    {% if s.verso_di_noi %}
+                    <span style="font-size:0.72rem;background:#dcfce7;color:#166534;padding:2px 8px;border-radius:10px;">verso di noi</span>
+                    {% else %}
+                    <span style="font-size:0.72rem;background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:10px;">in uscita da Fideuram</span>
+                    {% endif %}
                     <span style="font-weight:700;color:var(--blu-scuro);font-size:1.05rem;">{{ s.persone }} persone</span>
                     <span style="color:var(--grigio-testo);"> · {{ s.rete_precedente }} &rarr; <strong>{{ s.rete_nuova }}</strong></span>
                     <span style="color:var(--grigio-testo);"> · {{ s.provincia }}</span>
                 </div>
-                <div style="font-size:0.8rem;color:var(--grigio-testo);">rilevato {{ (s.data_elenco or '')|string|truncate(10, true, '') }}</div>
+                <div style="font-size:0.8rem;">
+                    {% if s.in_corso %}
+                    <span style="color:#b45309;font-weight:600;">&#9679; in corso</span> — rilevato in {{ s.finestra_giorni }} giorni
+                    {% else %}
+                    <span style="color:var(--grigio-testo);">storico — finestra di {{ (s.finestra_giorni / 365)|round(1) }} anni</span>
+                    {% endif %}
+                </div>
             </div>
             <div style="font-size:0.85rem;color:var(--grigio-testo);margin:0.4rem 0 0.6rem;">{{ s.nomi }}</div>
             {% if s.colleghi_rimasti %}
@@ -137,7 +149,12 @@
             {% endif %}
         </div>
         {% endfor %}
-        <p style="font-size:0.8rem;color:#b45309;margin:0.8rem 0 0;">
+        <p style="font-size:0.8rem;color:var(--grigio-testo);margin:0.8rem 0 0;">
+            I gruppi marcati «storico» vengono da un confronto su una finestra lunga e possono
+            mettere insieme partenze non simultanee. Quelli marcati «in corso» arrivano dal
+            confronto settimanale: sono squadre che si stanno muovendo adesso.
+        </p>
+        <p style="font-size:0.8rem;color:#b45309;margin:0.4rem 0 0;">
             Attenzione a come si legge: i dati mostrano che una squadra si muove <strong>insieme</strong>,
             nella stessa finestra — non a scaglioni. Che i colleghi rimasti seguano più tardi
             <strong>non risulta dai numeri</strong> (misure troppo poche e discordi). Quindi questa
@@ -294,26 +311,33 @@ function disegna(d) {
     }
     stato.innerHTML = '<strong>' + d.totale + '</strong> consulenti corrispondono · '
         + 'ne mostro ' + d.profili.length + ' (dal ' + (_offset + 1) + '&deg;) · '
-        + d.nuovi + ' non ancora in pipeline.';
+        + d.nuovi + ' non ancora in pipeline. <span style="color:var(--grigio-testo);">'
+        + 'Ordinati dal più propenso a cambiare rete.</span>';
     azioni.classList.remove('hidden');
 
     var righe = d.profili.map(function (p, i) {
         var badge = p.gia_in_pipeline
             ? '<span style="font-size:0.72rem;background:#f1f5f9;color:#64748b;padding:2px 7px;border-radius:10px;">gi&agrave; in pipeline</span>'
             : '';
-        var anz = '';
-        if (p.n_cambi > 0) anz = ' · ' + p.n_cambi + ' cambio/i di rete';
+        var pr = p.propensione || {};
+        var ind = pr.disponibile ? pr.indice : null;
+        var colore = ind === null ? '#94a3b8' : (ind >= 2 ? '#b45309' : (ind >= 1.2 ? '#2E7CF6' : '#94a3b8'));
         return '<tr>'
             + '<td><input type="checkbox" class="sel-albo" data-i="' + i + '"' + (p.gia_in_pipeline ? ' disabled' : '') + '></td>'
             + '<td><strong>' + esc(p.nome_completo) + '</strong> ' + badge + '</td>'
             + '<td>' + esc(p.rete || '—') + '</td>'
             + '<td>' + esc(p.comune || '') + (p.provincia ? ' (' + esc(p.provincia) + ')' : '') + '</td>'
-            + '<td>' + (p.eta ? p.eta + ' anni' : '—') + anz + '</td>'
+            + '<td>' + (p.eta ? p.eta + ' anni' : '—') + '</td>'
+            + '<td style="white-space:nowrap;"><strong style="color:' + colore + ';">'
+            + (ind === null ? '—' : ind + '&times;') + '</strong>'
+            + (pr.probabilita_annua !== undefined ? ' <span style="color:var(--grigio-testo);font-size:0.8rem;">' + pr.probabilita_annua + '%/anno</span>' : '')
+            + '<div style="font-size:0.75rem;color:var(--grigio-testo);">' + esc((pr.perche || []).join(' · ')) + '</div></td>'
             + '</tr>';
     }).join('');
 
     cont.innerHTML = '<table class="table"><thead><tr><th></th><th>Consulente</th><th>Rete</th>'
-        + '<th>Città</th><th>Profilo</th></tr></thead><tbody>' + righe + '</tbody></table>';
+        + '<th>Città</th><th>Età</th><th>Propensione al cambio</th></tr></thead><tbody>'
+        + righe + '</tbody></table>';
     cont._profili = d.profili;
 
     var pag = '';

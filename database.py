@@ -471,6 +471,12 @@ def init_db():
         # interno al gruppo) non e' una scelta individuale: va tracciato ma tenuto
         # fuori da statistiche e da qualunque etichetta di addestramento.
         "ALTER TABLE ocf_movimenti ADD COLUMN IF NOT EXISTS societario BOOLEAN DEFAULT FALSE",
+        # Ampiezza in giorni della finestra fra i due elenchi confrontati. Un
+        # passaggio visto in 7 giorni è "sta succedendo ora"; uno visto su una
+        # finestra di 3 anni dice solo "è successo in quel triennio". Senza questo
+        # numero le due cose sono indistinguibili e un grappolo storico sembra
+        # una squadra che si muove adesso.
+        "ALTER TABLE ocf_movimenti ADD COLUMN IF NOT EXISTS finestra_giorni INTEGER",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_ocf_mov_unico ON ocf_movimenti(chiave, data_elenco)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_mov_data   ON ocf_movimenti(rilevato_il DESC)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_mov_tipo   ON ocf_movimenti(tipo)",

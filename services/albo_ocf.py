@@ -263,9 +263,42 @@ def _registra_sync(esito: dict) -> None:
 RETE_PROPRIA = "Fideuram"
 
 
+def _ordina_per_propensione():
+    """
+    Espressione SQL che riproduce il coefficiente di propensione, così
+    l'ordinamento avviene sul database e la paginazione resta corretta
+    (ordinare solo la pagina corrente darebbe una classifica falsa).
+    Ritorna (frammento_sql, parametri) oppure (None, []) se i parametri non
+    sono ancora stimabili.
+    """
+    from services import propensione
+    par = propensione.parametri()
+    if not par.get("pronto"):
+        return None, []
+
+    pezzi, valori = [], []
+    for nome_rete, info in par["reti"].items():
+        pezzi.append("WHEN rete = ? THEN " + repr(round(info["tasso"], 6)))
+        valori.append(nome_rete)
+    caso_rete = "CASE " + " ".join(pezzi) + f" ELSE {round(par['base'], 6)} END" if pezzi else "1"
+
+    anno = date.today().year
+    m = propensione.MOLTIPLICATORI_ETA
+    caso_eta = (
+        "CASE WHEN anno_nascita IS NULL THEN 1.0 "
+        f"WHEN {anno} - anno_nascita < 35 THEN {m['<35']} "
+        f"WHEN {anno} - anno_nascita < 45 THEN {m['35-44']} "
+        f"WHEN {anno} - anno_nascita < 55 THEN {m['45-54']} "
+        f"WHEN {anno} - anno_nascita < 65 THEN {m['55-64']} "
+        f"ELSE {m['65+']} END"
+    )
+    return f"({caso_rete}) * ({caso_eta}) DESC, cognome", valori
+
+
 def cerca(rete: str = "", comune: str = "", provincia: str = "", regione: str = "",
           eta_min: int = None, eta_max: int = None, escludi_propria: bool = True,
-          solo_con_rete: bool = True, limite: int = 100, offset: int = 0) -> dict:
+          solo_con_rete: bool = True, limite: int = 100, offset: int = 0,
+          ordina_per: str = "propensione") -> dict:
     """
     Interroga lo snapshot dell'albo. Zero chiamate esterne, zero costi:
     è una query su tabella locale.
@@ -302,6 +335,13 @@ def cerca(rete: str = "", comune: str = "", provincia: str = "", regione: str = 
         par.append(anno - int(eta_max))
 
     where = " AND ".join(dove)
+
+    ordine, par_ordine = ("cognome, nome", [])
+    if ordina_per == "propensione":
+        espressione, valori = _ordina_per_propensione()
+        if espressione:
+            ordine, par_ordine = espressione, valori
+
     db = get_db()
     try:
         totale = db.execute(f"SELECT COUNT(*) AS n FROM ocf_iscritti WHERE {where}",
@@ -310,8 +350,8 @@ def cerca(rete: str = "", comune: str = "", provincia: str = "", regione: str = 
             f"""SELECT chiave, nome, cognome, anno_nascita, comune, provincia, regione,
                        rete, rete_dal, rete_dal_stimata, n_cambi
                   FROM ocf_iscritti WHERE {where}
-                 ORDER BY cognome, nome LIMIT ? OFFSET ?""",
-            par + [int(limite), int(offset)],
+                 ORDER BY {ordine} LIMIT ? OFFSET ?""",
+            par + par_ordine + [int(limite), int(offset)],
         ).fetchall()
     finally:
         db.close()
@@ -322,6 +362,16 @@ def cerca(rete: str = "", comune: str = "", provincia: str = "", regione: str = 
         d["eta"] = (anno - d["anno_nascita"]) if d.get("anno_nascita") else None
         d["nome_completo"] = f"{d.get('nome','')} {d.get('cognome','')}".strip()
         profili.append(d)
+
+    # Coefficiente e motivo in chiaro su ogni riga
+    try:
+        from services import propensione
+        p = propensione.parametri()
+        for d in profili:
+            d["propensione"] = propensione.coefficiente(d.get("rete", ""), d.get("eta"), p)
+    except Exception as e:  # pragma: no cover — la ricerca non deve dipenderne
+        logger.warning("Coefficiente non calcolabile: %s", e)
+
     return {"totale": totale, "profili": profili}
 
 
@@ -464,7 +514,8 @@ SOGLIA_QUOTA_SOCIETARIA = 0.25
 SOGLIA_PERSONE_SOCIETARIA = 20
 
 
-def _confronta(prima: dict, dopo: dict, data_dopo, etichetta_a: str, etichetta_b: str) -> list:
+def _confronta(prima: dict, dopo: dict, data_dopo, etichetta_a: str, etichetta_b: str,
+               finestra_giorni: int = None) -> list:
     """
     Passaggi fra due snapshot {chiave: record}. Ogni movimento porta il flag
     `societario`, così le riorganizzazioni non inquinano né le statistiche né
@@ -501,6 +552,7 @@ def _confronta(prima: dict, dopo: dict, data_dopo, etichetta_a: str, etichetta_b
             "comune": rec.get("comune", ""), "provincia": rec.get("provincia", ""),
             "rete_precedente": r0, "rete_nuova": r1, "data_elenco": data_dopo,
             "societario": bool(di_massa or stesso_gruppo(r0, r1)),
+            "finestra_giorni": finestra_giorni,
             "intervallo": f"{etichetta_a}→{etichetta_b}",
         })
     return movimenti_out
@@ -567,7 +619,8 @@ def importa_storico(limite_snapshot: int = 12) -> dict:
     movimenti_totali = []
     for a, b in zip(snapshot, snapshot[1:]):
         m = _confronta(a["persone"], b["persone"], b["data"],
-                       a["data"].isoformat(), b["data"].isoformat())
+                       a["data"].isoformat(), b["data"].isoformat(),
+                       finestra_giorni=(b["data"] - a["data"]).days)
         movimenti_totali += m
         veri = sum(1 for x in m if not x["societario"])
         esito["intervalli"].append({
@@ -599,16 +652,19 @@ def _scrivi_movimenti(movimenti: list) -> int:
             blocco = movimenti[i:i + BATCH]
             valori = [(m["chiave"], m["nome"], m["cognome"], m["comune"], m["provincia"],
                        "cambio_rete", m["rete_precedente"], m["rete_nuova"],
-                       m["data_elenco"], m["societario"], m["data_elenco"])
+                       m["data_elenco"], m["societario"], m["data_elenco"],
+                       m.get("finestra_giorni"))
                       for m in blocco]
             execute_values(cur, """
                 INSERT INTO ocf_movimenti (chiave, nome, cognome, comune, provincia, tipo,
                                            rete_precedente, rete_nuova, data_elenco,
-                                           societario, rilevato_il)
+                                           societario, rilevato_il, finestra_giorni)
                 SELECT v.chiave, v.nome, v.cognome, v.comune, v.provincia, v.tipo,
-                       v.rete_precedente, v.rete_nuova, v.data_elenco, v.societario, v.rilevato_il
+                       v.rete_precedente, v.rete_nuova, v.data_elenco, v.societario,
+                       v.rilevato_il, v.finestra_giorni
                   FROM (VALUES %s) AS v (chiave, nome, cognome, comune, provincia, tipo,
-                        rete_precedente, rete_nuova, data_elenco, societario, rilevato_il)
+                        rete_precedente, rete_nuova, data_elenco, societario, rilevato_il,
+                        finestra_giorni)
                  WHERE NOT EXISTS (
                     SELECT 1 FROM ocf_movimenti m
                      WHERE m.chiave = v.chiave AND m.data_elenco = v.data_elenco::date)
@@ -663,7 +719,8 @@ def serve_aggiornamento(giorni: int = 7) -> bool:
         return False
 
 
-def squadre_in_movimento(min_persone: int = 2, giorni: int = 1826, limite: int = 40) -> list:
+def squadre_in_movimento(min_persone: int = 2, giorni: int = 1826, limite: int = 40,
+                         solo_rete: str = "", max_finestra: int = None) -> list:
     """
     Grappoli di passaggi: più consulenti della STESSA rete e della STESSA provincia
     che nella stessa finestra sono andati alla STESSA destinazione.
@@ -680,18 +737,22 @@ def squadre_in_movimento(min_persone: int = 2, giorni: int = 1826, limite: int =
     try:
         righe = db.execute("""
             SELECT rete_precedente, rete_nuova, provincia, data_elenco,
-                   COUNT(*) AS persone,
+                   COUNT(*) AS persone, MAX(finestra_giorni) AS finestra_giorni,
                    STRING_AGG(nome || ' ' || cognome, ' · ' ORDER BY cognome) AS nomi,
                    STRING_AGG(DISTINCT comune, ', ')                          AS comuni
               FROM ocf_movimenti
              WHERE tipo = 'cambio_rete' AND societario IS NOT TRUE
                AND rilevato_il >= CURRENT_DATE - CAST(? AS INTEGER)
                AND COALESCE(provincia, '') <> ''
+               AND (? = '' OR rete_precedente = ? OR rete_nuova = ?)
+               AND (CAST(? AS INTEGER) IS NULL
+                    OR COALESCE(finestra_giorni, 99999) <= CAST(? AS INTEGER))
              GROUP BY rete_precedente, rete_nuova, provincia, data_elenco
             HAVING COUNT(*) >= ?
              ORDER BY COUNT(*) DESC, data_elenco DESC
              LIMIT ?
-        """, (int(giorni), int(min_persone), int(limite))).fetchall()
+        """, (int(giorni), solo_rete, solo_rete, solo_rete,
+              max_finestra, max_finestra, int(min_persone), int(limite))).fetchall()
     finally:
         db.close()
 
@@ -699,6 +760,11 @@ def squadre_in_movimento(min_persone: int = 2, giorni: int = 1826, limite: int =
     for r in righe:
         d = dict(r)
         d["colleghi_rimasti"] = _conta_colleghi(d["rete_precedente"], d["provincia"])
+        d["verso_di_noi"] = (d["rete_nuova"] == RETE_PROPRIA)
+        # Una finestra stretta significa "sta succedendo ora"; una larga significa
+        # solo "è successo in quel periodo". Vanno letti diversamente.
+        f = d.get("finestra_giorni")
+        d["in_corso"] = bool(f and f <= 60)
         squadre.append(d)
     return squadre
 

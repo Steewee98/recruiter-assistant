@@ -86,7 +86,8 @@ def index():
     # 1826 giorni ≈ 5 anni: lo storico ricostruito parte dal 2022
     ultimi_movimenti = albo_ocf.movimenti(tipo="cambio_rete", giorni=1826, limite=50)
     return render_template("albo.html", stats=stats, movimenti=ultimi_movimenti,
-                           squadre=albo_ocf.squadre_in_movimento(min_persone=2, limite=25),
+                           squadre=albo_ocf.squadre_in_movimento(
+                               min_persone=2, limite=25, solo_rete=albo_ocf.RETE_PROPRIA),
                            sync_in_corso=_sync_stato["in_corso"])
 
 
