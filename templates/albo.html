@@ -440,10 +440,16 @@ async function archiviaSegnalazione(btn) {
 }
 
 // ── Dossier: albo + coefficiente + LinkedIn + sintesi ────────────────────────
+var _dossierInCorso = false;
+var _lottoDossier = 0;
+
 async function dossierPrimi(quanti) {
     var cont = document.getElementById('albo-risultati');
     var area = document.getElementById('dossier-area');
     if (!cont._profili || !cont._profili.length) { alert('Fai prima una ricerca.'); return; }
+    // Un secondo lotto avviato mentre il primo gira sostituirebbe il contenitore
+    // e le risposte ancora in volo scriverebbero nelle schede sbagliate.
+    if (_dossierInCorso) { alert('Sto già preparando dei dossier: aspetta che finiscano.'); return; }
 
     // Se l'utente ha selezionato delle righe analizza quelle, altrimenti i primi N
     var scelti = [];
@@ -455,6 +461,8 @@ async function dossierPrimi(quanti) {
     if (!confirm('Preparo il dossier di ' + scelti.length + ' consulenti.\n'
                + 'Ogni dossier fa una ricerca LinkedIn a pagamento. Procedo?')) return;
 
+    _dossierInCorso = true;
+    var lotto = ++_lottoDossier;                     // prefisso unico per le schede
     area.innerHTML = '<h3 style="margin:1.2rem 0 0.6rem;color:var(--blu-scuro);">Dossier</h3>'
         + '<div id="dossier-progresso" style="font-size:0.85rem;color:var(--grigio-testo);margin-bottom:0.6rem;"></div>'
         + '<div id="dossier-lista" style="display:grid;gap:0.8rem;"></div>';
@@ -463,7 +471,7 @@ async function dossierPrimi(quanti) {
 
     scelti.forEach(function (p, i) {
         var el = document.createElement('div');
-        el.id = 'doss-' + i;
+        el.id = 'doss-' + lotto + '-' + i;
         el.style.cssText = 'border:1px solid var(--bordo,#e2e8f0);border-radius:12px;padding:1rem 1.2rem;background:#fff;';
         el.innerHTML = '<strong>' + esc(p.nome_completo) + '</strong>'
             + '<div style="font-size:0.85rem;color:var(--grigio-testo);margin-top:0.4rem;">'
@@ -479,17 +487,20 @@ async function dossierPrimi(quanti) {
                 body: JSON.stringify({profilo: p})
             });
             var d = await r.json();
-            document.getElementById('doss-' + i).innerHTML = r.ok ? renderDossier(d)
+            var box = document.getElementById('doss-' + lotto + '-' + i);
+            if (box) box.innerHTML = r.ok ? renderDossier(d)
                 : '<strong>' + esc(p.nome_completo) + '</strong><div style="color:#dc2626;font-size:0.85rem;">'
                   + esc(d.errore || 'Dossier non riuscito') + '</div>';
         } catch (e) {
-            document.getElementById('doss-' + i).innerHTML =
+            var box2 = document.getElementById('doss-' + lotto + '-' + i);
+            if (box2) box2.innerHTML =
                 '<strong>' + esc(p.nome_completo) + '</strong><div style="color:#dc2626;font-size:0.85rem;">Errore di rete.</div>';
         }
         fatti++;
-        prog.textContent = 'Pronti ' + fatti + '/' + scelti.length + '.';
+        if (lotto === _lottoDossier) prog.textContent = 'Pronti ' + fatti + '/' + scelti.length + '.';
     });
-    prog.textContent = 'Fatto: ' + scelti.length + ' dossier.';
+    if (lotto === _lottoDossier) prog.textContent = 'Fatto: ' + scelti.length + ' dossier.';
+    _dossierInCorso = false;
 }
 
 async function _pool(elementi, concorrenza, lavoro) {

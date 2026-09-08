@@ -27,8 +27,43 @@ Due scelte deliberate:
 """
 
 import logging
+import re
+import unicodedata
 
 logger = logging.getLogger(__name__)
+
+
+def _parole(testo: str) -> list:
+    """Minuscole, senza accenti, senza punteggiatura: 'D\'Alò' → ['d', 'alo']."""
+    piatto = unicodedata.normalize("NFKD", testo or "")
+    piatto = "".join(c for c in piatto if not unicodedata.combining(c))
+    return [p for p in re.split(r"[^a-z0-9]+", piatto.lower()) if p]
+
+
+def _nome_uguale(nome_cercato: str, cognome_cercato: str,
+                 nome_trovato: str, cognome_trovato: str) -> bool:
+    """
+    Verifica stretta del nominativo: ogni parola cercata deve comparire INTERA
+    fra le parole del profilo.
+
+    Il confronto per sottostringhe (`"rossi" in "gianmario rossini"`) fa passare
+    persone diverse: cercando «Mario Rossi» accetterebbe «Gianmario Rossini» e il
+    dossier finirebbe attribuito a uno sconosciuto. Su un elenco di 56.000
+    nominativi il caso non è teorico.
+
+    Il cognome deve corrispondere per intero; del nome basta la prima parola,
+    perché LinkedIn spesso riporta solo quella (o aggiunge secondi nomi).
+    """
+    cognomi_cercati = _parole(cognome_cercato)
+    parole_trovate = set(_parole(nome_trovato)) | set(_parole(cognome_trovato))
+    if not cognomi_cercati or not parole_trovate:
+        return False
+    if not all(c in parole_trovate for c in cognomi_cercati):
+        return False
+    nomi_cercati = _parole(nome_cercato)
+    if not nomi_cercati:
+        return True
+    return nomi_cercati[0] in parole_trovate
 
 
 def _cerca_linkedin(nome: str, cognome: str, rete: str = "", comune: str = "",
@@ -41,7 +76,7 @@ def _cerca_linkedin(nome: str, cognome: str, rete: str = "", comune: str = "",
     e un omonimo qualsiasi allegato al dossier sarebbe peggio di nessun profilo.
     """
     # Import locale: routes.ricerca importa a sua volta i servizi
-    from routes.ricerca import cerca_apify, normalizza_profilo, _nome_corrisponde
+    from routes.ricerca import cerca_apify, normalizza_profilo
 
     nome_completo = f"{nome} {cognome}".strip()
     if not cognome:
@@ -73,7 +108,7 @@ def _cerca_linkedin(nome: str, cognome: str, rete: str = "", comune: str = "",
         if not isinstance(item, dict):
             continue
         p = normalizza_profilo(item)
-        if _nome_corrisponde(nome_completo, p.get("nome", ""), p.get("cognome", "")):
+        if _nome_uguale(nome, cognome, p.get("nome", ""), p.get("cognome", "")):
             candidati.append(p)
         else:
             scartati.append(f"{p.get('nome','')} {p.get('cognome','')}".strip())
@@ -84,43 +119,64 @@ def _cerca_linkedin(nome: str, cognome: str, rete: str = "", comune: str = "",
                          if scartati else "")
                       + "."), []
 
-    def segnale_dominio(p):
-        """Punti che dicono 'è davvero un consulente finanziario di quella rete'."""
+    def segnali(p):
+        """
+        Due segnali distinti, perché dicono cose diverse:
+          • azienda   → il profilo cita la rete in cui l'albo lo colloca
+          • mestiere  → il profilo dice che fa consulenza finanziaria
+
+        Tenerli separati evita l'errore di considerare "verificato" un omonimo
+        solo perché la sua headline contiene una parola generica: un consulente
+        informatico o un dipendente qualsiasi di quella banca non sono la persona
+        che cerchiamo. La conferma piena richiede entrambi i segnali.
+        """
         testo = " ".join([p.get("ruolo", ""), p.get("azienda", ""),
                           p.get("sommario", "")]).lower()
-        punti = 0
-        for parola in (rete or "").lower().split():
-            if len(parola) > 3 and parola in testo:
-                punti += 3
-        if any(t in testo for t in ("consulen", "financial", "private bank", "wealth",
-                                    "banker", "patrimon", "advisor", "investiment",
-                                    "gestore", "promotore")):
-            punti += 2
-        return punti
+        # Parole della ragione sociale che non identificano nulla da sole
+        generiche = {"banca", "bank", "banco", "spa", "group", "gruppo", "italia",
+                     "italy", "private", "financial", "advisors", "capital",
+                     "management", "sgr", "sim", "investments", "premier"}
+        azienda = any(len(par) > 3 and par not in generiche and par in testo
+                      for par in _parole(rete or ""))
+        # Mestieri: espressioni specifiche, non prefissi come "consulen" che
+        # prendono anche "consulente informatico"
+        mestiere = any(t in testo for t in (
+            "consulente finanziario", "consulenza finanziaria", "consulente patrimoniale",
+            "financial advisor", "financial advisory", "private banker", "private banking",
+            "wealth manag", "wealth advis", "gestore patrimon", "promotore finanziario",
+            "family banker", "relationship manager", "consulente del credito",
+            "investment advisor", "asset manag",
+        ))
+        return azienda, mestiere
 
     def punteggio(p):
-        """Ordinamento: il segnale di dominio conta, il resto è solo spareggio."""
+        azienda, mestiere = segnali(p)
         testo = " ".join([p.get("ruolo", ""), p.get("location", "")]).lower()
         extra = (1 if comune and comune.lower() in testo else 0) + (1 if p.get("ruolo") else 0)
-        return segnale_dominio(p) * 10 + extra
+        return (3 if azienda else 0) * 10 + (2 if mestiere else 0) * 10 + extra
 
     candidati.sort(key=punteggio, reverse=True)
     migliore = candidati[0]
+    altri = [c.get("linkedin", "") for c in candidati[1:4] if c.get("linkedin")]
+    azienda, mestiere = segnali(migliore)
 
-    # Il criterio dell'incertezza è il SEGNALE DI DOMINIO, non il punteggio
-    # totale: "ha un ruolo scritto" non distingue un consulente finanziario da
-    # un HR specialist omonimo. Senza segnali di settore il profilo va marcato
-    # come da verificare, anche quando è l'unico candidato.
-    if segnale_dominio(migliore) == 0:
-        altri = [c.get("linkedin", "") for c in candidati[1:4] if c.get("linkedin")]
+    if not azienda and not mestiere:
         quanti = (f"{len(candidati)} profili con questo nome e nessuno"
                   if len(candidati) > 1 else "Profilo trovato ma nessun segnale")
         return migliore, (f"{quanti} che risulti del settore finanziario: "
                           "da verificare a mano prima di usarlo."), altri
-    if len(candidati) > 1:
-        altri = [c.get("linkedin", "") for c in candidati[1:4] if c.get("linkedin")]
-        return migliore, "", altri
-    return migliore, "", []
+
+    # Parità: due omonimi ugualmente plausibili non si risolvono col caso.
+    pari = [c for c in candidati if punteggio(c) == punteggio(migliore)]
+    if len(pari) > 1:
+        return migliore, (f"{len(pari)} profili con lo stesso nome e gli stessi segnali: "
+                          "il primo è una scelta arbitraria, da verificare."), altri
+
+    if not (azienda and mestiere):
+        manca = "la rete di appartenenza" if mestiere else "il mestiere"
+        return migliore, (f"Corrispondenza probabile ma non piena: nel profilo non compare "
+                          f"{manca}."), altri
+    return migliore, "", altri
 
 
 def costruisci(profilo: dict, con_linkedin: bool = True, con_ai: bool = True) -> dict:
@@ -183,8 +239,15 @@ def costruisci(profilo: dict, con_linkedin: bool = True, con_ai: bool = True) ->
 
     # 4) LinkedIn (costa: una ricerca Apify)
     if con_linkedin:
-        prof_li, nota, omonimi = _cerca_linkedin(nome, cognome, profilo.get("rete", ""),
-                                                 profilo.get("comune", ""))
+        # Anche il parsing di una risposta Apify malformata deve restare confinato
+        # qui: il resto del dossier è locale e non ha motivo di cadere con lui.
+        try:
+            prof_li, nota, omonimi = _cerca_linkedin(nome, cognome, profilo.get("rete", ""),
+                                                     profilo.get("comune", ""))
+        except Exception as e:
+            logger.error("Dossier: ricerca LinkedIn fallita per %s %s: %s",
+                         nome, cognome, e, exc_info=True)
+            prof_li, nota, omonimi = None, f"Ricerca LinkedIn non riuscita: {e}", []
         if prof_li:
             dossier["linkedin"] = {
                 "url": prof_li.get("linkedin", ""),
