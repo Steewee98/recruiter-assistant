@@ -410,7 +410,7 @@ def _matches_citta(location: str, citta_target: str) -> bool:
 
 def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pagine=1,
                 ruoli_lista=None, forza_italia=True, progress_cb=None, start_page=1,
-                max_items=10, max_wait=180):
+                max_items=10, max_wait=180, cerca_nome=None):
     """
     Flusso asincrono Apify in due step:
       STEP 1 — POST /acts/{actor}/runs  → avvia run, ottieni run_id
@@ -418,11 +418,30 @@ def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pag
       STEP 3 — GET  /datasets/{id}/items → recupera risultati (max 10)
     progress_cb(pct, messaggio) viene chiamata ad ogni step se fornita.
     start_page: pagina di partenza (1=prima, 2=seconda, …) per variare i risultati.
+
+    `cerca_nome=(nome, cognome)` cambia modalità: cerca UNA PERSONA usando i
+    filtri `firstNames`/`lastNames` dell'actor, che è l'unico modo affidabile.
+    (Le ricerche testuali per nome tornavano gente a caso: il campo `keywords`
+    non esiste nello schema dell'actor e veniva ignorato in silenzio — il campo
+    di ricerca libera si chiama `searchQuery`.)
+
     Restituisce (lista_profili, errore).
     """
     api_key = os.environ.get("APIFY_API_KEY", "")
     if not api_key:
         return None, "APIFY_API_KEY non configurata nel file .env"
+
+    if cerca_nome:
+        nome_p, cognome_p = cerca_nome
+        run_input = {
+            "maxItems": max_items,
+            "firstNames": [nome_p] if nome_p else [],
+            "lastNames": [cognome_p] if cognome_p else [],
+            "locations": [_normalizza_citta(citta)] if citta else ["Italy"],
+        }
+        if azienda:
+            run_input["currentCompanies"] = [azienda]
+        return _esegui_run_apify(run_input, api_key, max_wait, max_items, progress_cb)
 
     run_input = {
         "takePages": num_pagine,
@@ -442,7 +461,9 @@ def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pag
     if parole_chiave:
         kw_parts.append(parole_chiave)
     if kw_parts:
-        run_input["keywords"] = " ".join(kw_parts)
+        # Il campo si chiama `searchQuery` nello schema dell'actor: come
+        # `keywords` (usato finora) veniva accettato e ignorato in silenzio.
+        run_input["searchQuery"] = " ".join(kw_parts)
 
     # Location: normalizza città e aggiunge Italy se necessario
     if citta or paese:
@@ -460,6 +481,17 @@ def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pag
     print(f"=== APIFY REQUEST {datetime.datetime.now()} ===")
     print(json.dumps(run_input, indent=2, ensure_ascii=False))
     print("==========================================")
+
+    return _esegui_run_apify(run_input, api_key, max_wait, max_items, progress_cb)
+
+
+def _esegui_run_apify(run_input, api_key, max_wait=180, max_items=10, progress_cb=None):
+    """
+    Avvia una run dell'actor Apify, attende il completamento e restituisce
+    (lista_profili, errore). Estratta da cerca_apify perché la ricerca per nome
+    usa un input diverso ma esattamente lo stesso ciclo di attesa.
+    """
+    log.info("APIFY INPUT: %s", json.dumps(run_input, ensure_ascii=False))
 
     # ── STEP 1: Avvia run (non blocca) ────────────────────────────────────────
     if progress_cb:

@@ -98,7 +98,13 @@
         <div id="albo-azioni" class="hidden" style="margin-bottom:0.8rem;">
             <button class="btn btn-secondary" onclick="selezionaTutti()">Seleziona tutti i nuovi</button>
             <button class="btn btn-primary" onclick="importaSelezionati()">Importa in pipeline</button>
+            <button class="btn btn-primary" onclick="dossierPrimi(10)">&#128203; Dossier dei primi 10</button>
+            <div style="font-size:0.78rem;color:var(--grigio-testo);margin-top:0.35rem;">
+                Il dossier cerca il profilo LinkedIn di ciascuno: una ricerca a pagamento per persona,
+                una ventina di secondi l'una. Con la selezione attiva analizza i selezionati.
+            </div>
         </div>
+        <div id="dossier-area"></div>
         <div id="albo-risultati"></div>
         <div id="albo-paginazione" style="margin-top:1rem;text-align:center;"></div>
     </div>
@@ -431,6 +437,119 @@ async function archiviaSegnalazione(btn) {
     await fetch('/albo/squadre-viste', {method: 'POST'});
     var card = btn.closest('.card');
     if (card) card.remove();
+}
+
+// ── Dossier: albo + coefficiente + LinkedIn + sintesi ────────────────────────
+async function dossierPrimi(quanti) {
+    var cont = document.getElementById('albo-risultati');
+    var area = document.getElementById('dossier-area');
+    if (!cont._profili || !cont._profili.length) { alert('Fai prima una ricerca.'); return; }
+
+    // Se l'utente ha selezionato delle righe analizza quelle, altrimenti i primi N
+    var scelti = [];
+    cont.querySelectorAll('.sel-albo:checked').forEach(function (c) {
+        scelti.push(cont._profili[parseInt(c.dataset.i, 10)]);
+    });
+    if (!scelti.length) scelti = cont._profili.slice(0, quanti);
+
+    if (!confirm('Preparo il dossier di ' + scelti.length + ' consulenti.\n'
+               + 'Ogni dossier fa una ricerca LinkedIn a pagamento. Procedo?')) return;
+
+    area.innerHTML = '<h3 style="margin:1.2rem 0 0.6rem;color:var(--blu-scuro);">Dossier</h3>'
+        + '<div id="dossier-progresso" style="font-size:0.85rem;color:var(--grigio-testo);margin-bottom:0.6rem;"></div>'
+        + '<div id="dossier-lista" style="display:grid;gap:0.8rem;"></div>';
+    var lista = document.getElementById('dossier-lista');
+    var prog = document.getElementById('dossier-progresso');
+
+    scelti.forEach(function (p, i) {
+        var el = document.createElement('div');
+        el.id = 'doss-' + i;
+        el.style.cssText = 'border:1px solid var(--bordo,#e2e8f0);border-radius:12px;padding:1rem 1.2rem;background:#fff;';
+        el.innerHTML = '<strong>' + esc(p.nome_completo) + '</strong>'
+            + '<div style="font-size:0.85rem;color:var(--grigio-testo);margin-top:0.4rem;">'
+            + '<span class="spinner"></span> Cerco il profilo LinkedIn…</div>';
+        lista.appendChild(el);
+    });
+
+    var fatti = 0;
+    await _pool(scelti, 2, async function (p, i) {
+        try {
+            var r = await fetch('/albo/dossier', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({profilo: p})
+            });
+            var d = await r.json();
+            document.getElementById('doss-' + i).innerHTML = r.ok ? renderDossier(d)
+                : '<strong>' + esc(p.nome_completo) + '</strong><div style="color:#dc2626;font-size:0.85rem;">'
+                  + esc(d.errore || 'Dossier non riuscito') + '</div>';
+        } catch (e) {
+            document.getElementById('doss-' + i).innerHTML =
+                '<strong>' + esc(p.nome_completo) + '</strong><div style="color:#dc2626;font-size:0.85rem;">Errore di rete.</div>';
+        }
+        fatti++;
+        prog.textContent = 'Pronti ' + fatti + '/' + scelti.length + '.';
+    });
+    prog.textContent = 'Fatto: ' + scelti.length + ' dossier.';
+}
+
+async function _pool(elementi, concorrenza, lavoro) {
+    var i = 0;
+    async function operaio() {
+        while (i < elementi.length) {
+            var mio = i++;
+            await lavoro(elementi[mio], mio);
+        }
+    }
+    var operai = [];
+    for (var k = 0; k < Math.min(concorrenza, elementi.length); k++) operai.push(operaio());
+    await Promise.all(operai);
+}
+
+function renderDossier(d) {
+    var a = d.albo || {}, pr = d.propensione || {}, li = d.linkedin;
+    var h = '<div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:baseline;">'
+        + '<strong style="font-size:1.05rem;color:var(--blu-scuro);">' + esc(d.nome_completo) + '</strong>';
+    if (pr.disponibile)
+        h += '<span style="font-size:0.85rem;"><strong>' + pr.indice + '&times;</strong> la media · '
+           + pr.probabilita_annua + '%/anno</span>';
+    h += '</div>';
+
+    h += '<div style="font-size:0.85rem;color:var(--grigio-testo);margin:0.3rem 0 0.6rem;">'
+       + esc(a.rete || '') + ' · ' + esc(a.comune || '') + (a.provincia ? ' (' + esc(a.provincia) + ')' : '')
+       + (a.eta ? ' · ' + a.eta + ' anni' : '')
+       + (a.n_cambi ? ' · ' + a.n_cambi + ' passaggio/i già osservati' : '') + '</div>';
+
+    if (li && li.url) {
+        h += '<div style="margin-bottom:0.5rem;font-size:0.88rem;">'
+           + '<a href="' + esc(li.url) + '" target="_blank" rel="noopener" style="color:var(--azzurro,#2E7CF6);font-weight:600;">'
+           + esc(li.url) + '</a>'
+           + (li.ruolo ? '<div style="color:var(--grigio-testo);">' + esc(li.ruolo)
+                + (li.azienda ? ' · ' + esc(li.azienda) : '') + '</div>' : '')
+           + (li.sommario ? '<div style="color:var(--grigio-testo);font-size:0.82rem;margin-top:0.2rem;">'
+                + esc(li.sommario) + '</div>' : '')
+           + '</div>';
+    } else {
+        h += '<div style="font-size:0.85rem;color:#b45309;margin-bottom:0.5rem;">Profilo LinkedIn non trovato.</div>';
+    }
+
+    if (d.sintesi)
+        h += '<div style="background:#f8fafc;border-radius:8px;padding:0.7rem 0.9rem;font-size:0.9rem;margin-bottom:0.5rem;">'
+           + esc(d.sintesi) + '</div>';
+
+    if (pr.perche && pr.perche.length)
+        h += '<div style="font-size:0.8rem;color:var(--grigio-testo);">Perché: ' + esc(pr.perche.join(' · ')) + '</div>';
+
+    if (d.contesto_rete && d.contesto_rete.length) {
+        h += '<div style="font-size:0.8rem;color:var(--grigio-testo);margin-top:0.3rem;">Nella sua rete e zona: '
+           + d.contesto_rete.map(function (c) {
+                return c.persone + ' passati a ' + esc(c.rete_nuova);
+             }).join(' · ') + '</div>';
+    }
+
+    if (d.note && d.note.length)
+        h += '<div style="font-size:0.78rem;color:#b45309;margin-top:0.4rem;">' + esc(d.note.join(' ')) + '</div>';
+
+    return h;
 }
 
 function esc(s) {

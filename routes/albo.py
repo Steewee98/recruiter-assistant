@@ -296,6 +296,34 @@ def colleghi():
     return jsonify(albo_ocf.colleghi_rimasti(rete, provincia))
 
 
+@albo_bp.route("/albo/dossier", methods=["POST"])
+@login_required
+def dossier():
+    """
+    Dossier di UN consulente dell'albo. Il client lo chiama in progressivo per i
+    profili scelti (uno alla volta, con poca concorrenza): ogni dossier fa una
+    ricerca LinkedIn su Apify, che dura decine di secondi e si paga.
+    """
+    d = request.get_json() or {}
+    profilo = d.get("profilo") or {}
+    if not profilo.get("cognome"):
+        return jsonify({"errore": "Profilo senza cognome."}), 400
+
+    from services import dossier_albo
+    try:
+        esito = dossier_albo.costruisci(
+            profilo,
+            con_linkedin=d.get("con_linkedin", True),
+            con_ai=d.get("con_ai", True),
+        )
+    except Exception as e:
+        log.error("Dossier fallito per %s: %s", profilo.get("cognome"), e, exc_info=True)
+        return jsonify({"errore": f"Dossier non riuscito: {e}"}), 500
+    if not esito.get("ok"):
+        return jsonify(esito), 400
+    return jsonify(esito)
+
+
 @albo_bp.route("/albo/movimenti")
 @login_required
 def lista_movimenti():
