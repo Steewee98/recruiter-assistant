@@ -517,11 +517,32 @@ async function dossierPrimi(quanti) {
         fatti++;
         if (lotto === _lottoDossier) prog.textContent = 'Pronti ' + fatti + '/' + scelti.length + '.';
     });
-    if (lotto === _lottoDossier)
+    if (lotto === _lottoDossier) {
         prog.innerHTML = 'Fatto: ' + scelti.length + ' dossier. '
-            + '<span style="color:var(--grigio-testo);">Ora sono segnati come lavorati: '
-            + 'rilancia la ricerca per avere i 10 successivi.</span>';
+            + '<span style="color:var(--grigio-testo);">Ora sono segnati come lavorati.</span> '
+            + '<button class="btn btn-primary" style="font-size:0.82rem;padding:0.3rem 0.8rem;margin-left:0.4rem;" '
+            + 'onclick="prossimiDossier(' + scelti.length + ')">Analizza i prossimi '
+            + scelti.length + ' &rarr;</button>';
+    }
     _dossierInCorso = false;
+}
+
+// Rilancia la ricerca (i lavorati sono ormai esclusi) e prepara il lotto dopo.
+async function prossimiDossier(quanti) {
+    var prog = document.getElementById('dossier-progresso');
+    if (prog) prog.textContent = 'Cerco i prossimi ' + quanti + '…';
+    await cercaAlbo(0);
+
+    var cont = document.getElementById('albo-risultati');
+    var rimasti = (cont._profili || []).length;
+    if (!rimasti) {
+        if (prog) prog.innerHTML = 'Non è rimasto nessuno con questi filtri. '
+            + 'Prova ad allargare (provincia invece del comune, un\'altra rete, un\'altra fascia d\'età).';
+        return;
+    }
+    if (rimasti < quanti && prog)
+        prog.textContent = 'Ne restano ' + rimasti + ' con questi filtri: preparo quelli.';
+    await dossierPrimi(quanti);
 }
 
 async function _pool(elementi, concorrenza, lavoro) {
