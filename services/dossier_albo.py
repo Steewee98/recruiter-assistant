@@ -40,30 +40,54 @@ def _parole(testo: str) -> list:
     return [p for p in re.split(r"[^a-z0-9]+", piatto.lower()) if p]
 
 
+# Sigle e titoli che i consulenti finanziari aggiungono spesso al nome su
+# LinkedIn ("Mario Rossi EFPA", "Rossi, CFA"). Vanno ignorati nel confronto,
+# altrimenti scartiamo la persona giusta.
+_TITOLI = {"cfa", "cfp", "efa", "efpa", "esg", "frm", "caia", "cpa", "mba", "msc",
+           "phd", "dott", "dr", "avv", "ing", "prof", "cesga", "cfp®"}
+
+
 def _nome_uguale(nome_cercato: str, cognome_cercato: str,
                  nome_trovato: str, cognome_trovato: str) -> bool:
     """
-    Verifica stretta del nominativo: ogni parola cercata deve comparire INTERA
-    fra le parole del profilo.
+    Verifica stretta del nominativo, campo per campo.
 
-    Il confronto per sottostringhe (`"rossi" in "gianmario rossini"`) fa passare
-    persone diverse: cercando «Mario Rossi» accetterebbe «Gianmario Rossini» e il
-    dossier finirebbe attribuito a uno sconosciuto. Su un elenco di 56.000
-    nominativi il caso non è teorico.
+    Due errori da evitare, entrambi capaci di attribuire il dossier a uno
+    sconosciuto:
+      • il confronto per sottostringhe (`"rossi" in "gianmario rossini"`);
+      • il confronto per insiemi di parole, che accetta un cognome PIÙ LUNGO
+        ("Rossi" contro "Rossi Bianchi"): sono due persone diverse, e l'albo
+        riporta il cognome legale completo, quindi non c'è ragione di tollerare
+        parole in più.
 
-    Il cognome deve corrispondere per intero; del nome basta la prima parola,
-    perché LinkedIn spesso riporta solo quella (o aggiunge secondi nomi).
+    Il cognome deve quindi coincidere per intero (a meno di titoli e sigle
+    professionali). Del nome basta la prima parola, perché LinkedIn spesso
+    omette i secondi nomi.
     """
-    cognomi_cercati = _parole(cognome_cercato)
-    parole_trovate = set(_parole(nome_trovato)) | set(_parole(cognome_trovato))
-    if not cognomi_cercati or not parole_trovate:
+    def pulite(testo):
+        return [p for p in _parole(testo) if p not in _TITOLI]
+
+    cognomi_cercati = pulite(cognome_cercato)
+    if not cognomi_cercati:
         return False
-    if not all(c in parole_trovate for c in cognomi_cercati):
-        return False
-    nomi_cercati = _parole(nome_cercato)
+
+    cognomi_trovati = pulite(cognome_trovato)
+    nomi_trovati = pulite(nome_trovato)
+
+    if cognomi_trovati:
+        if set(cognomi_cercati) != set(cognomi_trovati):
+            return False
+    else:
+        # Alcune risposte hanno il nominativo tutto in un campo solo: in quel
+        # caso non si può separare, ci si accontenta della presenza delle parole.
+        if not all(c in set(nomi_trovati) for c in cognomi_cercati):
+            return False
+
+    nomi_cercati = pulite(nome_cercato)
     if not nomi_cercati:
         return True
-    return nomi_cercati[0] in parole_trovate
+    disponibili = set(nomi_trovati) | (set(cognomi_trovati) if not cognomi_trovati else set())
+    return nomi_cercati[0] in disponibili
 
 
 def _cerca_linkedin(nome: str, cognome: str, rete: str = "", comune: str = "",
@@ -325,9 +349,18 @@ def _sintesi_ai(dossier: dict) -> str:
     if p.get("disponibile"):
         fatti.append(f"Propensione stimata al cambio: {p['indice']}x la media di mercato "
                      f"({p['probabilita_annua']}% l'anno). Motivo: {'; '.join(p.get('perche', []))}")
-    if li:
+    # Il profilo LinkedIn entra nella sintesi SOLO se confermato. Se è marcato
+    # come dubbio (omonimi, nessun segnale di settore) darlo in pasto all'AI
+    # significa farle scrivere argomenti riferiti a un'altra persona: meglio una
+    # sintesi più povera che una sbagliata e convincente.
+    incerto = any(("verificare" in n or "arbitraria" in n or "non piena" in n)
+                  for n in dossier.get("note", []))
+    if li and not incerto:
         fatti.append(f"LinkedIn: {li.get('ruolo','')} presso {li.get('azienda','')}. "
                      f"{(li.get('sommario') or '')[:300]}")
+    elif li and incerto:
+        fatti.append("Profilo LinkedIn trovato ma NON confermato (possibile omonimo): "
+                     "non usarlo e non citarne il ruolo.")
     for c in contesto[:2]:
         fatti.append(f"Contesto: {c['persone']} colleghi di {c['rete_precedente']} "
                      f"({c['provincia']}) sono passati a {c['rete_nuova']}.")
@@ -339,7 +372,9 @@ def _sintesi_ai(dossier: dict) -> str:
         "Dì: (1) perché questa persona merita una chiamata adesso, (2) da quale "
         "argomento partire.\n"
         "Usa SOLO i fatti forniti. Se un dato manca, non inventarlo e non "
-        "riempire con frasi generiche di cortesia."
+        "riempire con frasi generiche di cortesia.\n"
+        "Se un dato è indicato come NON confermato, ignoralo completamente: non "
+        "citarlo e non costruirci sopra un argomento."
     )
     risposta = _chiama_api("dossier_albo", {
         "model": CLAUDE_MODEL,

@@ -89,6 +89,58 @@ def test_nome_simile_non_e_lo_stesso_nome():
     assert not dossier_albo._nome_uguale("Mario", "Rossi", "Mario", "Rossini")
     assert not dossier_albo._nome_uguale("Mario", "Rossi", "Gianmario", "Rossi")
     assert not dossier_albo._nome_uguale("Mario", "", "Mario", "Rossi"), "senza cognome non si conferma"
+    # Un cognome più lungo è un'altra persona: l'albo riporta quello legale completo
+    assert not dossier_albo._nome_uguale("Mario", "Rossi", "Mario", "Rossi Bianchi")
+    assert dossier_albo._nome_uguale("Mario", "Rossi Bianchi", "Mario", "Rossi Bianchi")
+    # Sigle professionali nel campo nome non devono far scartare la persona giusta
+    assert dossier_albo._nome_uguale("Mario", "Rossi", "Mario", "Rossi EFPA")
+    assert dossier_albo._nome_uguale("Mario", "Rossi", "Mario CFA", "Rossi")
+    # Nominativo tutto in un campo solo (risposte con fullName)
+    assert dossier_albo._nome_uguale("Mario", "Rossi", "Mario Rossi", "")
+
+
+def test_sintesi_non_usa_un_profilo_non_confermato():
+    """
+    Se il profilo LinkedIn è marcato come dubbio, l'AI non deve riceverlo:
+    scriverebbe argomenti riferiti a un omonimo.
+    """
+    from services import dossier_albo
+
+    catturato = {}
+
+    import ai_helpers
+    originale = ai_helpers._chiama_api
+
+    class _Finta:
+        content = [type("T", (), {"text": "ok"})()]
+
+    def finta(funzione, payload):
+        catturato["prompt"] = payload["messages"][0]["content"]
+        catturato["system"] = payload.get("system", "")
+        return _Finta()
+
+    ai_helpers._chiama_api = finta
+    try:
+        dubbio = {
+            "nome_completo": "Mario Rossi",
+            "albo": {"rete": "BNL BNP Paribas", "comune": "Roma", "provincia": "RM",
+                     "eta": 40, "n_cambi": 0},
+            "propensione": {"disponibile": True, "indice": 2.0, "probabilita_annua": 3.0,
+                            "perche": ["rete mobile"]},
+            "linkedin": {"ruolo": "HR Specialist", "azienda": "Acme", "sommario": "risorse umane"},
+            "contesto_rete": [],
+            "note": ["8 profili con questo nome e nessuno che risulti del settore "
+                     "finanziario: da verificare a mano prima di usarlo."],
+        }
+        dossier_albo._sintesi_ai(dubbio)
+        assert "HR Specialist" not in catturato["prompt"], catturato["prompt"]
+        assert "NON confermato" in catturato["prompt"]
+
+        sicuro = dict(dubbio, note=[])
+        dossier_albo._sintesi_ai(sicuro)
+        assert "HR Specialist" in catturato["prompt"], "un profilo confermato deve arrivare all\'AI"
+    finally:
+        ai_helpers._chiama_api = originale
 
 
 def test_fra_omonimi_sceglie_quello_del_settore():

@@ -416,6 +416,30 @@ def test_lucchetto_impedisce_sincronizzazioni_parallele():
     db = get_db(); _pulisci_test(db); db.close()
 
 
+def test_pagina_albo_non_ha_attributi_html_rotti():
+    """
+    Guardrail sul template: `tojson` produce virgolette DOPPIE, quindi dentro un
+    attributo delimitato da virgolette doppie lo spezza e il pulsante smette di
+    funzionare (successo davvero con «Chi è rimasto»). Qui si controlla che ogni
+    handler inline resti ben formato.
+    """
+    import re
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+    from app import app
+
+    app.config["TESTING"] = True
+    with app.test_client() as c:
+        with c.session_transaction() as sess:
+            sess["autenticato"] = True
+            sess["username"] = "test"
+        html = c.get("/albo").get_data(as_text=True)
+
+    rotti = [m.group(0)[:120] for m in re.finditer(r'onclick="[^"]*"[^\s>=]', html)]
+    assert not rotti, f"attributo onclick spezzato: {rotti[:2]}"
+    assert "mostraColleghi" in html, "il pulsante dei colleghi deve esserci"
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv

@@ -160,7 +160,7 @@
             <div style="font-size:0.85rem;color:var(--grigio-testo);margin:0.4rem 0 0.6rem;">{{ s.nomi }}</div>
             {% if s.colleghi_rimasti %}
             <button class="btn btn-secondary" style="font-size:0.82rem;padding:0.35rem 0.8rem;"
-                    onclick="mostraColleghi(this, {{ s.rete_precedente|tojson }}, {{ s.provincia|tojson }})">
+                    onclick='mostraColleghi(this, {{ s.rete_precedente|tojson }}, {{ s.provincia|tojson }})'>
                 Chi è rimasto in {{ s.rete_precedente }} ({{ s.provincia }}): {{ s.colleghi_rimasti }} &rarr;
             </button>
             <div class="colleghi" style="margin-top:0.7rem;"></div>
