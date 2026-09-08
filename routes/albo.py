@@ -324,6 +324,131 @@ def dossier():
     return jsonify(esito)
 
 
+def _testo_per_analisi(profilo: dict, linkedin: dict) -> str:
+    """
+    Testo su cui far ragionare l'AI: i dati dell'albo (certi) più quelli
+    LinkedIn (se il profilo è stato confermato). Dichiara la provenienza di
+    ciascun pezzo, così l'analisi non tratta un'ipotesi come un fatto.
+    """
+    linkedin = linkedin or {}
+    parti = [
+        f"Nome: {profilo.get('nome','')} {profilo.get('cognome','')}".strip(),
+        f"Ruolo: {linkedin.get('ruolo') or 'Consulente finanziario'}",
+        f"Azienda: {profilo.get('rete','')} (dato ufficiale albo OCF)",
+        f"Location: {profilo.get('comune','')} ({profilo.get('provincia','')})",
+    ]
+    if profilo.get("eta"):
+        parti.append(f"Età: {profilo['eta']} anni")
+    if profilo.get("n_cambi"):
+        parti.append(f"Passaggi di rete osservati negli elenchi ufficiali: {profilo['n_cambi']}")
+    if linkedin.get("sommario"):
+        parti.append(f"Sommario LinkedIn: {linkedin['sommario']}")
+    if linkedin.get("url"):
+        parti.append(f"LinkedIn: {linkedin['url']}")
+    return "\n".join(parti)
+
+
+@albo_bp.route("/albo/analizza", methods=["POST"])
+@login_required
+def analizza():
+    """
+    Analisi AI del profilo, come per gli altri candidati. Non salva nulla:
+    restituisce il risultato perché venga mostrato nella scheda, e sarà
+    l'utente a decidere se mandarlo in pipeline.
+    """
+    from ai_helpers import analizza_profilo_linkedin, messaggio_errore_ai
+
+    d = request.get_json() or {}
+    profilo = d.get("profilo") or {}
+    tipo_profilo = d.get("tipo_profilo") or "A"
+    if not profilo.get("cognome"):
+        return jsonify({"errore": "Profilo senza cognome."}), 400
+
+    db = get_db()
+    try:
+        imp = db.execute("SELECT * FROM impostazioni_profilo WHERE profilo = ?",
+                         (tipo_profilo,)).fetchone()
+    finally:
+        db.close()
+
+    testo = _testo_per_analisi(profilo, d.get("linkedin"))
+    try:
+        risultato = analizza_profilo_linkedin(testo, tipo_profilo, imp)
+    except Exception as e:
+        log.error("Analisi albo fallita: %s", e, exc_info=True)
+        return jsonify({"errore": messaggio_errore_ai(e)}), 502
+
+    return jsonify({"ok": True, "analisi": risultato, "testo_profilo": testo})
+
+
+@albo_bp.route("/albo/in-pipeline", methods=["POST"])
+@login_required
+def in_pipeline():
+    """
+    Manda in pipeline un singolo consulente del dossier, con l'analisi se è
+    stata fatta. Senza analisi il candidato entra comunque come «Da valutare»:
+    i dati dell'albo sono verificati, non serve il parere dell'AI per salvarli.
+    """
+    import json as _json
+
+    d = request.get_json() or {}
+    profilo = d.get("profilo") or {}
+    linkedin = d.get("linkedin") or {}
+    analisi = d.get("analisi") or {}
+    tipo_profilo = d.get("tipo_profilo") or "A"
+
+    nome = (profilo.get("nome") or "").strip()
+    cognome = (profilo.get("cognome") or "").strip()
+    if not cognome:
+        return jsonify({"errore": "Profilo senza cognome."}), 400
+
+    url = linkedin.get("url", "")
+    db = get_db()
+    try:
+        dup, motivo, cid = is_duplicate(db, {
+            "nome": nome, "cognome": cognome,
+            "azienda": profilo.get("rete", ""), "linkedin": url,
+        })
+        if dup:
+            return jsonify({"duplicato": True, "motivo": motivo, "candidato_id": cid}), 409
+
+        spunti = analisi.get("spunti_contatto") or []
+        citta = ", ".join(x for x in [profilo.get("comune", ""), profilo.get("provincia", "")] if x)
+        note = f"Da albo OCF · {citta}"
+        prop = profilo.get("propensione") or {}
+        if prop.get("indice"):
+            note += f" · propensione {prop['indice']}x la media"
+        gestore = ("Salvatore Sabia" if tipo_profilo == "A"
+                   else "Firdaous Filahi" if tipo_profilo == "B" else "Non assegnato")
+
+        cur = db.execute(
+            """INSERT INTO candidati
+               (nome, cognome, ruolo_attuale, azienda, note, profilo_linkedin,
+                tipo_profilo, stato, punteggio, analisi, spunti, messaggio_outreach,
+                source, url_fonte, gestore)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ocf', ?, ?)""",
+            (nome, cognome,
+             linkedin.get("ruolo") or "Consulente finanziario",
+             profilo.get("rete", ""), note, url, tipo_profilo,
+             "Da contattare" if analisi else "Da valutare",
+             analisi.get("punteggio"),
+             analisi.get("analisi_percorso") or "",
+             _json.dumps(spunti if isinstance(spunti, list) else [], ensure_ascii=False),
+             analisi.get("messaggio_outreach") or "",
+             url, gestore),
+        )
+        candidato_id = cur.lastrowid
+        db.commit()
+    except Exception as e:
+        log.error("Invio in pipeline fallito: %s", e, exc_info=True)
+        return jsonify({"errore": f"Salvataggio non riuscito: {e}"}), 500
+    finally:
+        db.close()
+
+    return jsonify({"ok": True, "candidato_id": candidato_id,
+                    "con_analisi": bool(analisi)})
+
+
 @albo_bp.route("/albo/movimenti")
 @login_required
 def lista_movimenti():

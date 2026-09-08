@@ -251,6 +251,122 @@ def test_dossier_rifiuta_profilo_senza_cognome():
     assert d["ok"] is False and "cognome" in d["errore"].lower()
 
 
+# ── Azioni sulla scheda: analisi AI e invio in pipeline ─────────────────────
+
+COGNOME_PROVA = "Testpipeline"
+
+
+def _client():
+    from app import app
+    app.config["TESTING"] = True
+    c = app.test_client()
+    with c.session_transaction() as sess:
+        sess["autenticato"] = True
+        sess["username"] = "test"
+    return c
+
+
+def _pulisci_prova():
+    from database import get_db
+    db = get_db()
+    db.execute("DELETE FROM candidati WHERE cognome = ?", (COGNOME_PROVA,))
+    db.commit()
+    db.close()
+
+
+def test_testo_per_analisi_dichiara_la_fonte():
+    """L'AI deve sapere quale dato è ufficiale e quale viene da LinkedIn."""
+    from routes.albo import _testo_per_analisi
+    testo = _testo_per_analisi(
+        {"nome": "Mario", "cognome": "Rossi", "rete": "Azimut", "comune": "Roma",
+         "provincia": "RM", "eta": 44, "n_cambi": 1},
+        {"ruolo": "Private Banker", "sommario": "20 anni di esperienza",
+         "url": "https://linkedin.com/in/x"})
+    assert "dato ufficiale albo OCF" in testo
+    assert "Azimut" in testo and "44 anni" in testo and "Private Banker" in testo
+    # Senza LinkedIn il testo resta valido
+    solo_albo = _testo_per_analisi({"nome": "Mario", "cognome": "Rossi",
+                                    "rete": "Azimut", "comune": "Roma"}, None)
+    assert "Consulente finanziario" in solo_albo
+
+
+def test_analisi_e_invio_in_pipeline(monkeypatch=None):
+    """Analisi (AI finta) e salvataggio: il candidato entra con punteggio e stato giusti."""
+    import ai_helpers
+    import routes.albo as A
+    from database import get_db
+
+    _pulisci_prova()
+    finta = {"punteggio": 8, "analisi_percorso": "Buon profilo",
+             "spunti_contatto": ["spunto uno", "spunto due"],
+             "messaggio_outreach": "Ciao Mario,"}
+    originale = A.__dict__.get("analizza_profilo_linkedin")
+    vero_ai = ai_helpers.analizza_profilo_linkedin
+    ai_helpers.analizza_profilo_linkedin = lambda *a, **k: finta
+    try:
+        c = _client()
+        profilo = {"nome": "Mario", "cognome": COGNOME_PROVA, "rete": "Azimut",
+                   "comune": "Roma", "provincia": "RM", "eta": 44,
+                   "propensione": {"indice": 1.7}}
+        linkedin = {"url": "https://linkedin.com/in/test-pipeline-xyz",
+                    "ruolo": "Private Banker"}
+
+        r = c.post("/albo/analizza", json={"profilo": profilo, "linkedin": linkedin,
+                                           "tipo_profilo": "B"})
+        assert r.status_code == 200, r.get_data(as_text=True)
+        assert r.get_json()["analisi"]["punteggio"] == 8
+
+        r = c.post("/albo/in-pipeline", json={"profilo": profilo, "linkedin": linkedin,
+                                              "analisi": finta, "tipo_profilo": "B"})
+        assert r.status_code == 200, r.get_data(as_text=True)
+        assert r.get_json()["con_analisi"] is True
+
+        db = get_db()
+        riga = db.execute("SELECT * FROM candidati WHERE cognome = ?", (COGNOME_PROVA,)).fetchone()
+        db.close()
+        assert riga["punteggio"] == 8
+        assert riga["stato"] == "Da contattare"
+        assert riga["source"] == "ocf"
+        assert riga["azienda"] == "Azimut"
+        assert "propensione 1.7x" in (riga["note"] or "")
+        assert "spunto uno" in (riga["spunti"] or "")
+
+        # Secondo invio: deve essere riconosciuto come duplicato
+        r = c.post("/albo/in-pipeline", json={"profilo": profilo, "linkedin": linkedin,
+                                              "analisi": finta, "tipo_profilo": "B"})
+        assert r.status_code == 409, r.status_code
+    finally:
+        ai_helpers.analizza_profilo_linkedin = vero_ai
+        if originale is not None:
+            A.analizza_profilo_linkedin = originale
+        _pulisci_prova()
+
+
+def test_invio_in_pipeline_senza_analisi():
+    """Senza analisi il candidato entra lo stesso, come «Da valutare»."""
+    from database import get_db
+
+    _pulisci_prova()
+    try:
+        c = _client()
+        r = c.post("/albo/in-pipeline", json={
+            "profilo": {"nome": "Anna", "cognome": COGNOME_PROVA, "rete": "Azimut",
+                        "comune": "Roma", "provincia": "RM"},
+            "linkedin": None, "analisi": None, "tipo_profilo": "A"})
+        assert r.status_code == 200, r.get_data(as_text=True)
+        assert r.get_json()["con_analisi"] is False
+
+        db = get_db()
+        riga = db.execute("SELECT stato, punteggio, gestore FROM candidati WHERE cognome = ?",
+                          (COGNOME_PROVA,)).fetchone()
+        db.close()
+        assert riga["stato"] == "Da valutare"
+        assert riga["punteggio"] is None
+        assert riga["gestore"] == "Salvatore Sabia"
+    finally:
+        _pulisci_prova()
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv

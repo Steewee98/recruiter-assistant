@@ -488,7 +488,8 @@ async function dossierPrimi(quanti) {
             });
             var d = await r.json();
             var box = document.getElementById('doss-' + lotto + '-' + i);
-            if (box) box.innerHTML = r.ok ? renderDossier(d)
+            if (box && r.ok) { box._dossier = d; box._profilo = p; }
+            if (box) box.innerHTML = r.ok ? renderDossier(d, box.id)
                 : '<strong>' + esc(p.nome_completo) + '</strong><div style="color:#dc2626;font-size:0.85rem;">'
                   + esc(d.errore || 'Dossier non riuscito') + '</div>';
         } catch (e) {
@@ -516,7 +517,7 @@ async function _pool(elementi, concorrenza, lavoro) {
     await Promise.all(operai);
 }
 
-function renderDossier(d) {
+function renderDossier(d, idBox) {
     var a = d.albo || {}, pr = d.propensione || {}, li = d.linkedin;
     var h = '<div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:baseline;">'
         + '<strong style="font-size:1.05rem;color:var(--blu-scuro);">' + esc(d.nome_completo) + '</strong>';
@@ -560,7 +561,92 @@ function renderDossier(d) {
     if (d.note && d.note.length)
         h += '<div style="font-size:0.78rem;color:#b45309;margin-top:0.4rem;">' + esc(d.note.join(' ')) + '</div>';
 
+    // Azioni: analisi AI del profilo e invio in pipeline
+    if (idBox) {
+        h += '<div class="azioni-dossier" style="margin-top:0.7rem;display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">'
+           + '<select class="form-select" style="width:auto;font-size:0.82rem;padding:0.25rem 0.5rem;" data-tipo>'
+           + '<option value="A">Profilo A</option><option value="B">Profilo B</option></select>'
+           + '<button class="btn btn-secondary" style="font-size:0.82rem;padding:0.35rem 0.8rem;" '
+           + 'onclick="analizzaDossier(\'' + idBox + '\')">Analizza profilo</button>'
+           + '<button class="btn btn-primary" style="font-size:0.82rem;padding:0.35rem 0.8rem;" '
+           + 'onclick="inPipeline(\'' + idBox + '\')">Manda in pipeline</button>'
+           + '<span class="esito-dossier" style="font-size:0.82rem;"></span>'
+           + '</div><div class="analisi-dossier"></div>';
+    }
     return h;
+}
+
+// ── Azioni sulla singola scheda ──────────────────────────────────────────────
+function _tipoScheda(box) {
+    var sel = box.querySelector('[data-tipo]');
+    return sel ? sel.value : 'A';
+}
+
+async function analizzaDossier(idBox) {
+    var box = document.getElementById(idBox);
+    if (!box || !box._dossier) return;
+    var esito = box.querySelector('.esito-dossier');
+    var area = box.querySelector('.analisi-dossier');
+    esito.textContent = 'Analizzo…';
+    try {
+        var r = await fetch('/albo/analizza', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                profilo: Object.assign({}, box._profilo, {propensione: box._dossier.propensione}),
+                linkedin: box._dossier.linkedin,
+                tipo_profilo: _tipoScheda(box)
+            })
+        });
+        var d = await r.json();
+        if (!r.ok) { esito.innerHTML = '<span style="color:#dc2626;">' + esc(d.errore || 'Analisi non riuscita') + '</span>'; return; }
+        box._analisi = d.analisi;
+        esito.innerHTML = '<span style="color:#166534;">Analisi pronta</span>';
+        area.innerHTML = renderAnalisi(d.analisi);
+    } catch (e) {
+        esito.innerHTML = '<span style="color:#dc2626;">Errore di rete.</span>';
+    }
+}
+
+function renderAnalisi(a) {
+    if (!a) return '';
+    var spunti = (a.spunti_contatto || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('');
+    return '<div style="margin-top:0.6rem;border-top:1px solid var(--bordo,#e2e8f0);padding-top:0.6rem;">'
+        + (a.punteggio !== undefined && a.punteggio !== null
+            ? '<div style="font-weight:700;color:var(--blu-scuro);">Punteggio ' + esc(a.punteggio) + '/10</div>' : '')
+        + (a.analisi_percorso ? '<div style="font-size:0.88rem;margin-top:0.3rem;">' + esc(a.analisi_percorso) + '</div>' : '')
+        + (spunti ? '<ul style="font-size:0.85rem;margin:0.4rem 0 0 1rem;">' + spunti + '</ul>' : '')
+        + (a.messaggio_outreach
+            ? '<div style="font-size:0.85rem;background:#f8fafc;border-radius:8px;padding:0.6rem 0.8rem;margin-top:0.5rem;white-space:pre-wrap;">'
+              + esc(a.messaggio_outreach) + '</div>' : '')
+        + '</div>';
+}
+
+async function inPipeline(idBox) {
+    var box = document.getElementById(idBox);
+    if (!box || !box._dossier) return;
+    var esito = box.querySelector('.esito-dossier');
+    esito.textContent = 'Salvo…';
+    try {
+        var r = await fetch('/albo/in-pipeline', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                profilo: Object.assign({}, box._profilo, {propensione: box._dossier.propensione}),
+                linkedin: box._dossier.linkedin,
+                analisi: box._analisi || null,
+                tipo_profilo: _tipoScheda(box)
+            })
+        });
+        var d = await r.json();
+        if (r.status === 409) {
+            esito.innerHTML = '<span style="color:#b45309;">Già in pipeline (' + esc(d.motivo || '') + ')</span>';
+            return;
+        }
+        if (!r.ok) { esito.innerHTML = '<span style="color:#dc2626;">' + esc(d.errore || 'Non salvato') + '</span>'; return; }
+        esito.innerHTML = '<span style="color:#166534;">In pipeline'
+            + (d.con_analisi ? ' con analisi' : ' — da valutare') + '</span>';
+    } catch (e) {
+        esito.innerHTML = '<span style="color:#dc2626;">Errore di rete.</span>';
+    }
 }
 
 function esc(s) {
