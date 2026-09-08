@@ -92,7 +92,12 @@
                 </div>
             </div>
 
-            <button class="btn btn-primary" style="width:100%;margin-top:1rem;justify-content:center;"
+            <label style="display:flex;gap:0.45rem;align-items:flex-start;margin-top:0.9rem;font-size:0.82rem;color:var(--grigio-testo);">
+                <input type="checkbox" id="f-lavorati" style="margin-top:0.15rem;">
+                <span>Mostra anche chi ho già lavorato (dossier fatto o già in pipeline)</span>
+            </label>
+
+            <button class="btn btn-primary" style="width:100%;margin-top:0.8rem;justify-content:center;"
                     onclick="cercaAlbo(0)">Cerca nell'albo</button>
             <div id="albo-errore" class="hidden" style="color:#dc2626;font-size:0.85rem;margin-top:0.6rem;"></div>
         </div>
@@ -311,6 +316,7 @@ async function cercaAlbo(offset) {
         provincia: document.getElementById('f-provincia').value.trim(),
         eta_min: document.getElementById('f-eta-min').value,
         eta_max: document.getElementById('f-eta-max').value,
+        escludi_lavorati: !document.getElementById('f-lavorati').checked,
         limite: 50, offset: _offset
     };
     try {
@@ -342,7 +348,10 @@ function disegna(d) {
     stato.innerHTML = '<strong>' + d.totale + '</strong> consulenti corrispondono · '
         + 'ne mostro ' + d.profili.length + ' (dal ' + (_offset + 1) + '&deg;) · '
         + d.nuovi + ' non ancora in pipeline. <span style="color:var(--grigio-testo);">'
-        + 'Ordinati dal più propenso a cambiare rete.</span>';
+        + 'Ordinati dal più propenso a cambiare rete.</span>'
+        + (d.esclusi_lavorati ? '<br><span style="color:var(--grigio-testo);">'
+             + d.esclusi_lavorati + ' esclusi perché già lavorati (dossier fatto o in pipeline)'
+             + ' — spunta la casella nei filtri per rivederli.</span>' : '');
     azioni.classList.remove('hidden');
 
     var righe = d.profili.map(function (p, i) {
@@ -508,7 +517,10 @@ async function dossierPrimi(quanti) {
         fatti++;
         if (lotto === _lottoDossier) prog.textContent = 'Pronti ' + fatti + '/' + scelti.length + '.';
     });
-    if (lotto === _lottoDossier) prog.textContent = 'Fatto: ' + scelti.length + ' dossier.';
+    if (lotto === _lottoDossier)
+        prog.innerHTML = 'Fatto: ' + scelti.length + ' dossier. '
+            + '<span style="color:var(--grigio-testo);">Ora sono segnati come lavorati: '
+            + 'rilancia la ricerca per avere i 10 successivi.</span>';
     _dossierInCorso = false;
 }
 

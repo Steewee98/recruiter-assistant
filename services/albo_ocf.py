@@ -328,10 +328,40 @@ def _ordina_per_propensione():
     return f"({caso_rete}) * ({caso_eta}) DESC, cognome", valori
 
 
+def registra_dossier(profilo: dict, linkedin_url: str = "", esito: str = "analizzato",
+                     punteggio=None, candidato_id=None) -> None:
+    """
+    Segna che questa persona è stata lavorata, così non ricompare fra «i primi N».
+    Se esiste già, aggiorna l'esito (da 'analizzato' a 'in_pipeline').
+    Non solleva: una registrazione mancata non deve far fallire un dossier.
+    """
+    chiave = (profilo or {}).get("chiave")
+    if not chiave:
+        return
+    try:
+        db = get_db()
+        db.execute("""
+            INSERT INTO ocf_dossier (chiave, nome, cognome, rete, linkedin_url,
+                                     esito, punteggio, candidato_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (chiave) DO UPDATE SET
+                linkedin_url = COALESCE(NULLIF(EXCLUDED.linkedin_url, ''), ocf_dossier.linkedin_url),
+                esito = EXCLUDED.esito,
+                punteggio = COALESCE(EXCLUDED.punteggio, ocf_dossier.punteggio),
+                candidato_id = COALESCE(EXCLUDED.candidato_id, ocf_dossier.candidato_id),
+                data_dossier = CURRENT_TIMESTAMP
+        """, (chiave, profilo.get("nome", ""), profilo.get("cognome", ""),
+              profilo.get("rete", ""), linkedin_url or "", esito, punteggio, candidato_id))
+        db.commit()
+        db.close()
+    except Exception as e:  # pragma: no cover
+        logger.warning("Registrazione dossier non riuscita: %s", e)
+
+
 def cerca(rete: str = "", comune: str = "", provincia: str = "", regione: str = "",
           eta_min: int = None, eta_max: int = None, escludi_propria: bool = True,
           solo_con_rete: bool = True, limite: int = 100, offset: int = 0,
-          ordina_per: str = "propensione") -> dict:
+          ordina_per: str = "propensione", escludi_lavorati: bool = True) -> dict:
     """
     Interroga lo snapshot dell'albo. Zero chiamate esterne, zero costi:
     è una query su tabella locale.
@@ -359,6 +389,14 @@ def cerca(rete: str = "", comune: str = "", provincia: str = "", regione: str = 
     if regione:
         dove.append("LOWER(regione) = LOWER(?)")
         par.append(regione.strip())
+    if escludi_lavorati:
+        # Fuori chi ha già un dossier e chi è già in pipeline: «i primi 10» devono
+        # essere dieci nomi NUOVI, non gli stessi di ieri.
+        dove.append("chiave NOT IN (SELECT chiave FROM ocf_dossier)")
+        dove.append("""NOT EXISTS (SELECT 1 FROM candidati c
+                        WHERE LOWER(c.nome) = LOWER(ocf_iscritti.nome)
+                          AND LOWER(c.cognome) = LOWER(ocf_iscritti.cognome))""")
+
     anno = date.today().year
     if eta_min:
         dove.append("anno_nascita IS NOT NULL AND anno_nascita <= ?")
@@ -368,6 +406,11 @@ def cerca(rete: str = "", comune: str = "", provincia: str = "", regione: str = 
         par.append(anno - int(eta_max))
 
     where = " AND ".join(dove)
+    # Quanti ne sono stati tolti perché già lavorati: va detto, non nascosto
+    # Condizioni senza il filtro "già lavorati": servono a dire quanti ne sono
+    # stati tolti. Nasconderli in silenzio farebbe sembrare che il segmento si
+    # sia esaurito.
+    where_tutti = " AND ".join(d for d in dove if "ocf_dossier" not in d and "candidati c" not in d)
 
     ordine, par_ordine = ("cognome, nome", [])
     if ordina_per == "propensione":
@@ -379,6 +422,11 @@ def cerca(rete: str = "", comune: str = "", provincia: str = "", regione: str = 
     try:
         totale = db.execute(f"SELECT COUNT(*) AS n FROM ocf_iscritti WHERE {where}",
                             par).fetchone()["n"]
+        esclusi = 0
+        if escludi_lavorati:
+            complessivo = db.execute(
+                f"SELECT COUNT(*) AS n FROM ocf_iscritti WHERE {where_tutti}", par).fetchone()["n"]
+            esclusi = max(0, complessivo - totale)
         righe = db.execute(
             f"""SELECT chiave, nome, cognome, anno_nascita, comune, provincia, regione,
                        rete, rete_dal, rete_dal_stimata, n_cambi
@@ -405,7 +453,7 @@ def cerca(rete: str = "", comune: str = "", provincia: str = "", regione: str = 
     except Exception as e:  # pragma: no cover — la ricerca non deve dipenderne
         logger.warning("Coefficiente non calcolabile: %s", e)
 
-    return {"totale": totale, "profili": profili}
+    return {"totale": totale, "profili": profili, "esclusi_lavorati": esclusi}
 
 
 def verifica(nome: str, cognome: str) -> dict:

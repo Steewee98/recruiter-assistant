@@ -471,6 +471,72 @@ def test_ricerca_per_provincia_include_i_comuni_minori():
     assert provincia > comune, (provincia, comune)
 
 
+def test_chi_e_gia_stato_lavorato_non_ricompare():
+    """
+    «I primi 10» devono essere dieci nomi NUOVI: l'ordinamento per propensione è
+    stabile, quindi senza traccia del lavoro fatto verrebbero riproposti sempre
+    gli stessi. Chi è escluso resta comunque raggiungibile a richiesta.
+    """
+    from database import get_db
+    from services import albo_ocf
+
+    primi = albo_ocf.cerca(provincia="RM", limite=3)
+    assert primi["profili"], "serve almeno un profilo per la prova"
+    primo = primi["profili"][0]
+
+    db = get_db()
+    db.execute("DELETE FROM ocf_dossier WHERE chiave = ?", (primo["chiave"],))
+    db.commit()
+    db.close()
+
+    albo_ocf.registra_dossier(primo, linkedin_url="https://linkedin.com/in/prova")
+    try:
+        dopo = albo_ocf.cerca(provincia="RM", limite=3)
+        chiavi = [p["chiave"] for p in dopo["profili"]]
+        assert primo["chiave"] not in chiavi, "chi ha già un dossier non deve ricomparire"
+        assert dopo["totale"] == primi["totale"] - 1
+        assert dopo["esclusi_lavorati"] == primi["esclusi_lavorati"] + 1
+
+        # ...ma deve restare visibile se lo si chiede esplicitamente
+        con_tutti = albo_ocf.cerca(provincia="RM", limite=50, escludi_lavorati=False)
+        assert primo["chiave"] in [p["chiave"] for p in con_tutti["profili"]]
+    finally:
+        db = get_db()
+        db.execute("DELETE FROM ocf_dossier WHERE chiave = ?", (primo["chiave"],))
+        db.commit()
+        db.close()
+
+
+def test_registrazione_dossier_aggiorna_lesito_senza_duplicare():
+    """Analizzato e poi mandato in pipeline: una riga sola, con l'esito aggiornato."""
+    from database import get_db
+    from services import albo_ocf
+
+    finto = {"chiave": "chiave_di_prova_dossier", "nome": "Mario",
+             "cognome": "Testdossier", "rete": "Azimut"}
+    db = get_db()
+    db.execute("DELETE FROM ocf_dossier WHERE chiave = ?", (finto["chiave"],))
+    db.commit()
+    db.close()
+    try:
+        albo_ocf.registra_dossier(finto, linkedin_url="https://linkedin.com/in/x")
+        albo_ocf.registra_dossier(finto, esito="in_pipeline", punteggio=8, candidato_id=123)
+
+        db = get_db()
+        righe = db.execute("SELECT * FROM ocf_dossier WHERE chiave = ?",
+                           (finto["chiave"],)).fetchall()
+        db.close()
+        assert len(righe) == 1, f"attesa una sola riga, trovate {len(righe)}"
+        r = righe[0]
+        assert r["esito"] == "in_pipeline" and r["punteggio"] == 8 and r["candidato_id"] == 123
+        assert r["linkedin_url"], "l'URL del primo passaggio non deve andare perso"
+    finally:
+        db = get_db()
+        db.execute("DELETE FROM ocf_dossier WHERE chiave = ?", (finto["chiave"],))
+        db.commit()
+        db.close()
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv

@@ -215,6 +215,7 @@ def cerca():
             eta_min=d.get("eta_min") or None, eta_max=d.get("eta_max") or None,
             limite=min(int(d.get("limite") or 100), 500),
             offset=int(d.get("offset") or 0),
+            escludi_lavorati=d.get("escludi_lavorati", True),
         )
     except Exception as e:
         log.error("Ricerca albo fallita: %s", e, exc_info=True)
@@ -275,6 +276,7 @@ def importa():
                  p.get("tipo_profilo") or "A", "Da valutare"),
             )
             inseriti += 1
+            albo_ocf.registra_dossier(p, esito="in_pipeline")
         db.commit()
     except Exception as e:
         log.error("Import da albo fallito: %s", e, exc_info=True)
@@ -321,6 +323,12 @@ def dossier():
         return jsonify({"errore": f"Dossier non riuscito: {e}"}), 500
     if not esito.get("ok"):
         return jsonify(esito), 400
+
+    # Segna che questa persona è stata lavorata: alla prossima richiesta di
+    # «primi 10» non deve ricomparire, altrimenti si ripaga la stessa ricerca.
+    albo_ocf.registra_dossier(profilo,
+                              linkedin_url=(esito.get("linkedin") or {}).get("url", ""),
+                              esito="analizzato")
     return jsonify(esito)
 
 
@@ -445,6 +453,8 @@ def in_pipeline():
     finally:
         db.close()
 
+    albo_ocf.registra_dossier(profilo, linkedin_url=url, esito="in_pipeline",
+                              punteggio=analisi.get("punteggio"), candidato_id=candidato_id)
     return jsonify({"ok": True, "candidato_id": candidato_id,
                     "con_analisi": bool(analisi)})
 

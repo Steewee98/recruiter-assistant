@@ -463,6 +463,23 @@ def init_db():
             errore        TEXT,
             eseguito_il   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
+        # Chi è già stato lavorato: senza questa traccia «i primi 10» sarebbero
+        # sempre gli stessi 10, perché l'ordinamento per propensione è stabile.
+        # Registra anche chi è stato analizzato ma NON mandato in pipeline: il
+        # lavoro fatto conta comunque, altrimenti si ripaga la stessa ricerca.
+        """CREATE TABLE IF NOT EXISTS ocf_dossier (
+            id            SERIAL PRIMARY KEY,
+            chiave        TEXT UNIQUE NOT NULL,
+            nome          TEXT,
+            cognome       TEXT,
+            rete          TEXT,
+            linkedin_url  TEXT,
+            esito         TEXT DEFAULT 'analizzato',
+            punteggio     INTEGER,
+            candidato_id  INTEGER,
+            data_dossier  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_ocf_dossier_data ON ocf_dossier(data_dossier DESC)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_rete       ON ocf_iscritti(rete)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_comune     ON ocf_iscritti(comune)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_provincia  ON ocf_iscritti(provincia)",
