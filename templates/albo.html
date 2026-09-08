@@ -67,11 +67,19 @@
                 {% endfor %}
             </select>
 
-            <label class="form-label" style="margin-top:0.8rem;">Comune</label>
-            <input class="form-input" id="f-comune" placeholder="Es. Roma" autocomplete="off">
-
             <label class="form-label" style="margin-top:0.8rem;">Provincia (sigla)</label>
             <input class="form-input" id="f-provincia" placeholder="Es. RM" maxlength="2" autocomplete="off">
+            <div style="font-size:0.76rem;color:var(--grigio-testo);margin-top:0.25rem;">
+                È il filtro da usare per «chi lavora su Roma».
+            </div>
+
+            <label class="form-label" style="margin-top:0.8rem;">Comune (facoltativo)</label>
+            <input class="form-input" id="f-comune" placeholder="Es. Roma" autocomplete="off">
+            <div style="font-size:0.76rem;color:#b45309;margin-top:0.25rem;">
+                Attenzione: l'albo pubblica il <strong>domicilio eletto</strong> (di norma la
+                residenza), non l'ufficio. Su LinkedIn troverai spesso una città diversa.
+                Restringere al comune perde circa metà della provincia.
+            </div>
 
             <div style="display:flex;gap:0.5rem;margin-top:0.8rem;">
                 <div style="flex:1;">
@@ -358,7 +366,7 @@ function disegna(d) {
     }).join('');
 
     cont.innerHTML = '<table class="table"><thead><tr><th></th><th>Consulente</th><th>Rete</th>'
-        + '<th>Città</th><th>Età</th><th>Propensione al cambio</th></tr></thead><tbody>'
+        + '<th>Domicilio (albo)</th><th>Età</th><th>Propensione al cambio</th></tr></thead><tbody>'
         + righe + '</tbody></table>';
     cont._profili = d.profili;
 
@@ -527,9 +535,21 @@ function renderDossier(d, idBox) {
     h += '</div>';
 
     h += '<div style="font-size:0.85rem;color:var(--grigio-testo);margin:0.3rem 0 0.6rem;">'
-       + esc(a.rete || '') + ' · ' + esc(a.comune || '') + (a.provincia ? ' (' + esc(a.provincia) + ')' : '')
+       + esc(a.rete || '') + ' · domicilio ' + esc(a.comune || '—')
+       + (a.provincia ? ' (' + esc(a.provincia) + ')' : '')
        + (a.eta ? ' · ' + a.eta + ' anni' : '')
        + (a.n_cambi ? ' · ' + a.n_cambi + ' passaggio/i già osservati' : '') + '</div>';
+
+    // La sede dichiarata su LinkedIn è un'altra cosa dal domicilio dell'albo:
+    // mostrarle affiancate evita che la differenza sembri un errore.
+    if (li && li.location) {
+        var diversa = a.comune && li.location.toLowerCase().indexOf(a.comune.toLowerCase()) === -1;
+        h += '<div style="font-size:0.82rem;color:var(--grigio-testo);margin-bottom:0.5rem;">'
+           + 'Sede su LinkedIn: <strong>' + esc(li.location) + '</strong>'
+           + (diversa ? ' <span style="color:#b45309;">— diversa dal domicilio: l\'albo pubblica '
+                      + 'il domicilio eletto, non l\'ufficio</span>' : '')
+           + '</div>';
+    }
 
     if (li && li.url) {
         h += '<div style="margin-bottom:0.5rem;font-size:0.88rem;">'

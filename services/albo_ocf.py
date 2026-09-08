@@ -1,6 +1,16 @@
 """
 Servizio Albo OCF — sincronizzazione, ricerca e radar movimenti.
 
+⚠️ COSA SIGNIFICA IL COMUNE. L'indirizzo pubblicato nell'albo è il "domicilio
+eletto" del consulente (art. 146 Reg. Intermediari Consob), cioè l'indirizzo che
+ha comunicato all'Organismo — quasi sempre la residenza. NON è l'ufficio dove
+lavora, e infatti su LinkedIn spesso compare una città diversa: uno con domicilio
+a Guidonia può lavorare a Roma, e viceversa.
+
+Conseguenza pratica: per capire "chi lavora su Roma" il filtro giusto è la
+PROVINCIA, non il comune. Filtrare per comune="Roma" perde circa metà dei
+consulenti della provincia e ne include alcuni che a Roma non ci lavorano.
+
 Idea di fondo: invece di *campionare* LinkedIn sperando di incrociare un
 consulente finanziario, si parte dalla POPOLAZIONE COMPLETA pubblicata da OCF
 (~56.000 CF abilitati, aggiornata dall'Organismo) e si filtra per rete e città.

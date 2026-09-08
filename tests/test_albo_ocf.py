@@ -440,6 +440,37 @@ def test_pagina_albo_non_ha_attributi_html_rotti():
     assert "mostraColleghi" in html, "il pulsante dei colleghi deve esserci"
 
 
+def test_pagina_dichiara_che_il_comune_e_il_domicilio():
+    """
+    L'albo pubblica il domicilio eletto, non l'ufficio: la pagina deve dirlo,
+    altrimenti la differenza con la città su LinkedIn sembra un errore del tool.
+    """
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+    from app import app
+
+    app.config["TESTING"] = True
+    with app.test_client() as c:
+        with c.session_transaction() as sess:
+            sess["autenticato"] = True
+            sess["username"] = "test"
+        html = c.get("/albo").get_data(as_text=True)
+
+    assert "domicilio eletto" in html
+    assert "Domicilio (albo)" in html, "la colonna non deve chiamarsi genericamente «Città»"
+
+
+def test_ricerca_per_provincia_include_i_comuni_minori():
+    """
+    Filtrare per comune capoluogo perde chi ha domicilio in provincia ma lavora
+    in città: la ricerca per provincia deve restituirne di più.
+    """
+    from services import albo_ocf
+    provincia = albo_ocf.cerca(provincia="RM", limite=1)["totale"]
+    comune = albo_ocf.cerca(comune="Roma", limite=1)["totale"]
+    assert provincia > comune, (provincia, comune)
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv
