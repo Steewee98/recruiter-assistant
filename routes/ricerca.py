@@ -433,10 +433,17 @@ def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pag
 
     if cerca_nome:
         nome_p, cognome_p = cerca_nome
+        # Accetta sia una persona ("Mario", "Rossi") sia un gruppo di persone
+        # (["Mario","Anna"], ["Rossi","Bianchi"]): l'actor si paga a run, non a
+        # risultato, quindi cercarne dieci insieme costa quanto cercarne uno.
+        # I risultati sono il prodotto incrociato dei nomi — le combinazioni
+        # sbagliate le scarta chi chiama, verificando nome per nome.
+        nomi = nome_p if isinstance(nome_p, (list, tuple)) else ([nome_p] if nome_p else [])
+        cognomi = cognome_p if isinstance(cognome_p, (list, tuple)) else ([cognome_p] if cognome_p else [])
         run_input = {
             "maxItems": max_items,
-            "firstNames": [nome_p] if nome_p else [],
-            "lastNames": [cognome_p] if cognome_p else [],
+            "firstNames": [n for n in nomi if n],
+            "lastNames": [c for c in cognomi if c],
             "locations": [_normalizza_citta(citta)] if citta else ["Italy"],
         }
         if azienda:

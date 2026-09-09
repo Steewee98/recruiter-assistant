@@ -480,6 +480,23 @@ def init_db():
             data_dossier  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
         "CREATE INDEX IF NOT EXISTS idx_ocf_dossier_data ON ocf_dossier(data_dossier DESC)",
+        # Storico del loop giornaliero: un'automazione che lavora da sola deve
+        # poter rendere conto di cosa ha fatto e perché ha scartato qualcuno.
+        """CREATE TABLE IF NOT EXISTS ocf_loop_run (
+            id                 SERIAL PRIMARY KEY,
+            stato              TEXT,
+            esaminati          INTEGER DEFAULT 0,
+            con_linkedin       INTEGER DEFAULT 0,
+            analizzati         INTEGER DEFAULT 0,
+            importati          INTEGER DEFAULT 0,
+            scartati_punteggio INTEGER DEFAULT 0,
+            senza_linkedin     INTEGER DEFAULT 0,
+            errori             INTEGER DEFAULT 0,
+            nota               TEXT,
+            dettaglio          TEXT,
+            eseguito_il        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_ocf_loop_data ON ocf_loop_run(eseguito_il DESC)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_rete       ON ocf_iscritti(rete)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_comune     ON ocf_iscritti(comune)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_provincia  ON ocf_iscritti(provincia)",

@@ -24,7 +24,7 @@ from flask import Blueprint, jsonify, render_template, request
 from database import get_db
 from dedup import is_duplicate
 from routes.auth import login_required
-from services import albo_ocf
+from services import albo_ocf, loop_giornaliero
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +40,9 @@ _sync_lock = threading.Lock()
 # abbastanza fitto da non perdere passaggi di rete, abbastanza rado da non
 # martellare il portale OCF.
 GIORNI_CADENZA = 7
+
+# Stato del giro giornaliero lanciato a mano dalla pagina
+_loop_stato = {"in_corso": False, "esito": None}
 
 # Ogni quanto il pianificatore ricontrolla se è ora di aggiornare. Non è la
 # cadenza dell'aggiornamento (quella è GIORNI_CADENZA): è solo la frequenza con
@@ -102,6 +105,19 @@ def _pianificatore():
                 _avvia_sync()
         except Exception as e:  # pragma: no cover — il thread non deve mai morire
             log.warning("Pianificatore albo: %s", e)
+
+        # Giro giornaliero: porta nuovi consulenti in «Da valutare».
+        try:
+            if os.environ.get("LOOP_GIORNALIERO", "1") == "1" and not loop_giornaliero.gia_eseguito_oggi():
+                log.info("Loop giornaliero: avvio")
+                esito = loop_giornaliero.esegui()
+                log.info("Loop giornaliero: %s — importati %s su %s esaminati (%s)",
+                         "ok" if esito.get("ok") else "saltato",
+                         esito.get("importati"), esito.get("esaminati"),
+                         esito.get("nota") or "")
+        except Exception as e:  # pragma: no cover
+            log.warning("Loop giornaliero: %s", e)
+
         time.sleep(CONTROLLO_OGNI_SECONDI)
 
 
@@ -139,6 +155,11 @@ def index():
         solo_provincia=albo_ocf.PROVINCIA_OPERATIVA, solo_non_viste=True)
     return render_template("albo.html", stats=stats, movimenti=ultimi_movimenti,
                            squadre=squadre, squadre_nuove=nuove,
+                           loop_esecuzioni=loop_giornaliero.ultime_esecuzioni(5),
+                           loop_conf={"provincia": loop_giornaliero.PROVINCIA,
+                                      "eta": loop_giornaliero.ETA_MINIMA - 1,
+                                      "soglia": loop_giornaliero.PUNTEGGIO_MINIMO,
+                                      "al_giorno": loop_giornaliero.AL_GIORNO},
                            provincia=albo_ocf.PROVINCIA_OPERATIVA,
                            sync_in_corso=_sync_stato["in_corso"])
 
@@ -457,6 +478,42 @@ def in_pipeline():
                               punteggio=analisi.get("punteggio"), candidato_id=candidato_id)
     return jsonify({"ok": True, "candidato_id": candidato_id,
                     "con_analisi": bool(analisi)})
+
+
+@albo_bp.route("/albo/loop", methods=["POST"])
+@login_required
+def loop_adesso():
+    """
+    Esegue subito il giro giornaliero, in background: dieci analisi richiedono
+    minuti, non i secondi di una richiesta HTTP.
+    """
+    if _loop_stato["in_corso"]:
+        return jsonify({"ok": False, "errore": "Un giro è già in corso."}), 409
+    forza = bool((request.get_json() or {}).get("ignora_budget"))
+
+    def _lavora():
+        _loop_stato["in_corso"] = True
+        try:
+            _loop_stato["esito"] = loop_giornaliero.esegui(ignora_budget=forza)
+        except Exception as e:  # pragma: no cover
+            log.error("Loop manuale fallito: %s", e, exc_info=True)
+            _loop_stato["esito"] = {"ok": False, "nota": str(e)}
+        finally:
+            _loop_stato["in_corso"] = False
+
+    threading.Thread(target=_lavora, daemon=True).start()
+    return jsonify({"ok": True, "avviato": True})
+
+
+@albo_bp.route("/albo/loop/stato")
+@login_required
+def loop_stato():
+    return jsonify({
+        "in_corso": _loop_stato["in_corso"],
+        "esito": _loop_stato["esito"],
+        "budget": loop_giornaliero.budget_apify(),
+        "esecuzioni": loop_giornaliero.ultime_esecuzioni(5),
+    })
 
 
 @albo_bp.route("/albo/movimenti")

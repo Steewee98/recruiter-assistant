@@ -143,46 +143,59 @@ def _cerca_linkedin(nome: str, cognome: str, rete: str = "", comune: str = "",
                          if scartati else "")
                       + "."), []
 
-    def segnali(p):
-        """
-        Due segnali distinti, perché dicono cose diverse:
-          • azienda   → il profilo cita la rete in cui l'albo lo colloca
-          • mestiere  → il profilo dice che fa consulenza finanziaria
+    return _scegli_fra_omonimi(candidati, rete, comune)
 
-        Tenerli separati evita l'errore di considerare "verificato" un omonimo
-        solo perché la sua headline contiene una parola generica: un consulente
-        informatico o un dipendente qualsiasi di quella banca non sono la persona
-        che cerchiamo. La conferma piena richiede entrambi i segnali.
-        """
-        testo = " ".join([p.get("ruolo", ""), p.get("azienda", ""),
-                          p.get("sommario", "")]).lower()
-        # Parole della ragione sociale che non identificano nulla da sole
-        generiche = {"banca", "bank", "banco", "spa", "group", "gruppo", "italia",
-                     "italy", "private", "financial", "advisors", "capital",
-                     "management", "sgr", "sim", "investments", "premier"}
-        azienda = any(len(par) > 3 and par not in generiche and par in testo
-                      for par in _parole(rete or ""))
-        # Mestieri: espressioni specifiche, non prefissi come "consulen" che
-        # prendono anche "consulente informatico"
-        mestiere = any(t in testo for t in (
-            "consulente finanziario", "consulenza finanziaria", "consulente patrimoniale",
-            "financial advisor", "financial advisory", "private banker", "private banking",
-            "wealth manag", "wealth advis", "gestore patrimon", "promotore finanziario",
-            "family banker", "relationship manager", "consulente del credito",
-            "investment advisor", "asset manag",
-        ))
-        return azienda, mestiere
 
+def _segnali(p: dict, rete: str):
+    """
+    Due segnali distinti, perché dicono cose diverse:
+      • azienda   → il profilo cita la rete in cui l'albo lo colloca
+      • mestiere  → il profilo dice che fa consulenza finanziaria
+
+    Tenerli separati evita l'errore di considerare "verificato" un omonimo solo
+    perché la sua headline contiene una parola generica: un consulente
+    informatico o un dipendente qualsiasi di quella banca non sono la persona
+    che cerchiamo. La conferma piena richiede entrambi i segnali.
+    """
+    testo = " ".join([p.get("ruolo", ""), p.get("azienda", ""),
+                      p.get("sommario", "")]).lower()
+    # Parole della ragione sociale che non identificano nulla da sole
+    generiche = {"banca", "bank", "banco", "spa", "group", "gruppo", "italia",
+                 "italy", "private", "financial", "advisors", "capital",
+                 "management", "sgr", "sim", "investments", "premier"}
+    azienda = any(len(par) > 3 and par not in generiche and par in testo
+                  for par in _parole(rete or ""))
+    # Mestieri: espressioni specifiche, non prefissi come "consulen" che
+    # prendono anche "consulente informatico"
+    mestiere = any(t in testo for t in (
+        "consulente finanziario", "consulenza finanziaria", "consulente patrimoniale",
+        "financial advisor", "financial advisory", "private banker", "private banking",
+        "wealth manag", "wealth advis", "gestore patrimon", "promotore finanziario",
+        "family banker", "relationship manager", "consulente del credito",
+        "investment advisor", "asset manag",
+    ))
+    return azienda, mestiere
+
+
+def _scegli_fra_omonimi(candidati: list, rete: str = "", comune: str = ""):
+    """
+    Fra più profili con lo stesso nome sceglie il più plausibile e dichiara
+    quanta fiducia merita. Ritorna (migliore, nota, altri_url).
+
+    Condivisa fra la ricerca singola e quella a gruppi: il criterio di
+    attribuzione dev'essere identico, altrimenti l'automazione applicherebbe uno
+    standard diverso da quello che l'utente vede a schermo.
+    """
     def punteggio(p):
-        azienda, mestiere = segnali(p)
+        azienda, mestiere = _segnali(p, rete)
         testo = " ".join([p.get("ruolo", ""), p.get("location", "")]).lower()
         extra = (1 if comune and comune.lower() in testo else 0) + (1 if p.get("ruolo") else 0)
         return (3 if azienda else 0) * 10 + (2 if mestiere else 0) * 10 + extra
 
-    candidati.sort(key=punteggio, reverse=True)
+    candidati = sorted(candidati, key=punteggio, reverse=True)
     migliore = candidati[0]
     altri = [c.get("linkedin", "") for c in candidati[1:4] if c.get("linkedin")]
-    azienda, mestiere = segnali(migliore)
+    azienda, mestiere = _segnali(migliore, rete)
 
     if not azienda and not mestiere:
         quanti = (f"{len(candidati)} profili con questo nome e nessuno"
@@ -201,6 +214,54 @@ def _cerca_linkedin(nome: str, cognome: str, rete: str = "", comune: str = "",
         return migliore, (f"Corrispondenza probabile ma non piena: nel profilo non compare "
                           f"{manca}."), altri
     return migliore, "", altri
+
+
+def cerca_linkedin_gruppo(persone: list, max_wait: int = 150) -> dict:
+    """
+    Cerca su LinkedIn i profili di PIÙ persone con una sola run Apify.
+
+    Perché: l'actor si paga a run (~0,10 $), non a risultato. Cercarne dieci una
+    alla volta costa dieci volte cercarle insieme — con un tetto mensile di 29 $
+    la differenza decide se l'automazione è sostenibile o no.
+
+    L'actor incrocia nomi e cognomi, quindi restituisce anche combinazioni che
+    non esistono fra i nostri target: ogni risultato viene riassegnato alla
+    persona giusta con la stessa verifica stretta usata sul singolo, e le
+    combinazioni spurie vengono buttate.
+
+    Ritorna {chiave: {"profilo": ..., "nota": ..., "omonimi": [...]}}.
+    """
+    from routes.ricerca import cerca_apify, normalizza_profilo
+
+    persone = [p for p in persone if (p.get("cognome") or "").strip() and p.get("chiave")]
+    if not persone:
+        return {}
+
+    nomi = sorted({(p.get("nome") or "").strip() for p in persone if p.get("nome")})
+    cognomi = sorted({(p.get("cognome") or "").strip() for p in persone})
+    items, errore = cerca_apify(
+        ruolo="", citta="", max_items=max(20, len(persone) * 6), max_wait=max_wait,
+        cerca_nome=(nomi, cognomi),
+    )
+    if errore:
+        return {p["chiave"]: {"profilo": None, "omonimi": [],
+                              "nota": f"LinkedIn non raggiungibile: {errore}"}
+                for p in persone}
+
+    normalizzati = [normalizza_profilo(i) for i in (items or []) if isinstance(i, dict)]
+
+    esito = {}
+    for p in persone:
+        nome, cognome = (p.get("nome") or "").strip(), (p.get("cognome") or "").strip()
+        suoi = [n for n in normalizzati
+                if _nome_uguale(nome, cognome, n.get("nome", ""), n.get("cognome", ""))]
+        if not suoi:
+            esito[p["chiave"]] = {"profilo": None, "omonimi": [],
+                                  "nota": "Nessun profilo LinkedIn corrispondente."}
+            continue
+        migliore, nota, altri = _scegli_fra_omonimi(suoi, p.get("rete", ""), p.get("comune", ""))
+        esito[p["chiave"]] = {"profilo": migliore, "nota": nota, "omonimi": altri}
+    return esito
 
 
 def costruisci(profilo: dict, con_linkedin: bool = True, con_ai: bool = True) -> dict:

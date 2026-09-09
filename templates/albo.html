@@ -123,6 +123,49 @@
     </div>
 </div>
 
+<!-- ===== Loop giornaliero ===== -->
+<div class="card" style="margin-top:1.5rem;">
+    <div class="card-header"><h3>Giro giornaliero automatico</h3></div>
+    <div class="card-body">
+        <p style="font-size:0.85rem;color:var(--grigio-testo);margin:0 0 0.9rem;">
+            Ogni giorno prende <strong>{{ loop_conf.al_giorno }}</strong> consulenti dell'albo
+            in provincia di <strong>{{ loop_conf.provincia }}</strong> sopra i
+            <strong>{{ loop_conf.eta }} anni</strong>, partendo dai più propensi a cambiare;
+            ne cerca il profilo LinkedIn, scarta chi non ne ha uno attribuibile con certezza,
+            analizza gli altri e porta in <strong>«Da valutare»</strong> chi prende almeno
+            <strong>{{ loop_conf.soglia }}</strong>. Chi è già stato toccato non torna mai:
+            anche gli scarti restano registrati.
+        </p>
+        <div id="loop-budget" style="font-size:0.85rem;margin-bottom:0.8rem;"></div>
+        <button class="btn btn-primary" id="btn-loop" onclick="eseguiLoop()">Esegui un giro adesso</button>
+        <span id="loop-stato" style="font-size:0.85rem;margin-left:0.6rem;"></span>
+
+        <div id="loop-storico" style="margin-top:1rem;">
+        {% if loop_esecuzioni %}
+        <table class="table">
+            <thead><tr><th>Quando</th><th>Esito</th><th>Esaminati</th><th>Con LinkedIn</th>
+                       <th>Importati</th><th>Scartati</th><th>Nota</th></tr></thead>
+            <tbody>
+            {% for e in loop_esecuzioni %}
+                <tr>
+                    <td>{{ (e.eseguito_il or '')[:16] }}</td>
+                    <td>{{ e.stato }}</td>
+                    <td>{{ e.esaminati }}</td>
+                    <td>{{ e.con_linkedin }}</td>
+                    <td><strong>{{ e.importati }}</strong></td>
+                    <td>{{ e.scartati_punteggio + e.senza_linkedin }}</td>
+                    <td style="font-size:0.8rem;color:var(--grigio-testo);">{{ e.nota }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color:var(--grigio-testo);font-size:0.9rem;margin:0;">Nessun giro ancora eseguito.</p>
+        {% endif %}
+        </div>
+    </div>
+</div>
+
 <!-- ===== Squadre in movimento ===== -->
 {% if squadre_nuove %}
 <div class="card" style="margin-top:1.5rem;border-left:4px solid #b45309;">
@@ -700,6 +743,60 @@ async function inPipeline(idBox) {
     } catch (e) {
         esito.innerHTML = '<span style="color:#dc2626;">Errore di rete.</span>';
     }
+}
+
+// ── Giro giornaliero ─────────────────────────────────────────────────────────
+async function mostraBudget() {
+    try {
+        var d = await (await fetch('/albo/loop/stato')).json();
+        var b = d.budget || {};
+        var box = document.getElementById('loop-budget');
+        if (!b.noto) { box.innerHTML = '<span style="color:var(--grigio-testo);">Budget Apify non leggibile.</span>'; return; }
+        var esaurito = b.residuo < 2;
+        box.innerHTML = '<span style="color:' + (esaurito ? '#b45309' : 'var(--grigio-testo)') + ';">'
+            + 'Budget ricerche: <strong>' + b.usato + '$</strong> usati su ' + b.tetto + '$'
+            + ' · restano <strong>' + b.residuo + '$</strong>'
+            + (b.fine_ciclo ? ' fino al ' + b.fine_ciclo : '')
+            + (esaurito ? ' — il giro automatico resta fermo finché non si rinnova' : '')
+            + '</span>';
+        if (d.in_corso) seguiLoop();
+    } catch (e) { /* la pagina resta usabile anche senza */ }
+}
+mostraBudget();
+
+async function eseguiLoop() {
+    var btn = document.getElementById('btn-loop');
+    var stato = document.getElementById('loop-stato');
+    btn.disabled = true;
+    stato.textContent = 'Avvio…';
+    try {
+        var d = await (await fetch('/albo/loop', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                  body: '{}'})).json();
+        if (!d.ok) { stato.textContent = d.errore || 'Non avviato.'; btn.disabled = false; return; }
+        seguiLoop();
+    } catch (e) { stato.textContent = 'Errore di rete.'; btn.disabled = false; }
+}
+
+function seguiLoop() {
+    var stato = document.getElementById('loop-stato');
+    var btn = document.getElementById('btn-loop');
+    btn.disabled = true;
+    var t = setInterval(async function () {
+        try {
+            var d = await (await fetch('/albo/loop/stato')).json();
+            if (d.in_corso) { stato.textContent = 'Giro in corso… (ricerche e analisi, qualche minuto)'; return; }
+            clearInterval(t);
+            btn.disabled = false;
+            var e = d.esito;
+            if (!e) { stato.textContent = ''; return; }
+            stato.innerHTML = e.ok
+                ? '<span style="color:#166534;">Esaminati ' + e.esaminati + ' · con LinkedIn ' + e.con_linkedin
+                  + ' · <strong>importati ' + e.importati + '</strong> · scartati '
+                  + (e.scartati_punteggio + e.senza_linkedin) + '</span>'
+                : '<span style="color:#b45309;">' + esc(e.nota || 'Giro non eseguito') + '</span>';
+            setTimeout(function () { location.reload(); }, 2500);
+        } catch (err) { clearInterval(t); btn.disabled = false; }
+    }, 4000);
 }
 
 function esc(s) {
