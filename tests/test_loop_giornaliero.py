@@ -101,7 +101,13 @@ def _pulisci():
     for c in COGNOMI_PROVA:
         db.execute("DELETE FROM candidati WHERE cognome = ?", (c,))
     db.execute("DELETE FROM ocf_dossier WHERE chiave IN ('loop_k1','loop_k2','loop_k3')")
-    db.execute("DELETE FROM ocf_loop_run WHERE nota LIKE '%finta%' OR stato = 'prova'")
+    # Le righe di storico create dai test vanno via: `esegui()` ne scrive una a
+    # ogni giro, e i nomi finti sono l'unico modo per riconoscerle senza toccare
+    # lo storico vero.
+    db.execute("DELETE FROM ocf_loop_run WHERE dettaglio LIKE '%Loop%'")
+    db.execute("""DELETE FROM ocf_loop_run
+                   WHERE stato = 'saltata_budget'
+                     AND nota LIKE '%28.5%'""")
     db.commit()
     db.close()
 
