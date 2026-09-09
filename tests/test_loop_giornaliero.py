@@ -40,8 +40,9 @@ class _finto_mondo:
     - Carla → LinkedIn trovato, punteggio 4   → deve essere scartata dopo l'AI
     """
 
-    def __init__(self, budget=None):
+    def __init__(self, budget=None, sedi=None):
         self.budget = budget or {"noto": True, "usato": 1.0, "tetto": 29.0, "residuo": 28.0}
+        self.sedi = sedi or {}
         self.analisi_fatte = []
 
     def __enter__(self):
@@ -58,7 +59,10 @@ class _finto_mondo:
         albo_ocf.cerca = lambda **k: {"totale": len(persone), "profili": persone[:k.get("limite", 10)],
                                       "esclusi_lavorati": 0}
 
+        prova_sedi = self
+
         def gruppo(gente, **k):
+            self = prova_sedi
             fuori = {}
             for p in gente:
                 if p["cognome"] == "Loopdue":
@@ -69,6 +73,7 @@ class _finto_mondo:
                         "nome": p["nome"], "cognome": p["cognome"],
                         "ruolo": "Consulente finanziario presso Azimut",
                         "azienda": "Azimut", "sommario": "esperienza",
+                        "location": self.sedi.get(p["cognome"], "Rome, Latium, Italy"),
                         "linkedin": f"https://linkedin.com/in/{p['chiave']}"},
                         "nota": "", "omonimi": []}
             return fuori
@@ -218,6 +223,38 @@ def test_storico_registrato():
         db.close()
     finally:
         _pulisci()
+
+
+def test_scarta_chi_su_linkedin_non_e_a_roma():
+    """
+    L'albo dà il domicilio, LinkedIn la sede di lavoro: se la sede non è Roma il
+    candidato non è del territorio e non va importato — né analizzato, perché
+    l'analisi si paga.
+    """
+    from services import loop_giornaliero as L
+
+    _pulisci()
+    try:
+        with _finto_mondo(sedi={"Loopuno": "Milan, Lombardy, Italy",
+                                "Looptre": ""}) as mondo:
+            r = L.esegui(limite=3)
+        assert r["fuori_zona"] == 2, r
+        assert r["importati"] == 0, "nessuno dei due lavora a Roma"
+        assert not mondo.analisi_fatte, "non si analizza chi è gia' fuori zona"
+    finally:
+        _pulisci()
+
+
+def test_riconoscimento_sede_romana():
+    from services.loop_giornaliero import lavora_a_roma
+    assert lavora_a_roma("Rome, Latium, Italy")
+    assert lavora_a_roma("Roma, Lazio, Italia")
+    assert lavora_a_roma("Rome Metropolitan Area")
+    assert lavora_a_roma("Frascati, Lazio, Italy"), "i comuni della provincia valgono"
+    assert not lavora_a_roma("Milan, Lombardy, Italy")
+    assert not lavora_a_roma("Lazio, Italia"), "la sola regione non basta"
+    assert not lavora_a_roma(""), "sede vuota non è una conferma"
+    assert not lavora_a_roma(None)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,8 @@ Cosa fa, una volta al giorno:
   1. prende dall'albo OCF i consulenti di ROMA (provincia) sopra i 30 anni,
      ordinati per propensione al cambio, saltando chi è già stato lavorato;
   2. ne cerca il profilo LinkedIn — tutti insieme, in un'unica ricerca;
-  3. scarta chi non ha un profilo LinkedIn attribuibile con certezza;
+  3. scarta chi non ha un profilo LinkedIn attribuibile con certezza, e chi su
+     LinkedIn NON risulta lavorare a Roma;
   4. sui restanti lancia l'analisi AI;
   5. chi prende almeno PUNTEGGIO_MINIMO entra in pipeline come «Da valutare».
 
@@ -21,6 +22,12 @@ Tre vincoli che hanno guidato il progetto:
 • NIENTE LAVORO RIPETUTO. Ogni persona toccata viene registrata, compresi gli
   scarti: senza profilo LinkedIn, o con punteggio basso. Altrimenti domani si
   ripagherebbe la stessa ricerca per riottenere lo stesso "no".
+
+• ROMA DEVE RISULTARE DA ENTRAMBE LE FONTI. L'albo dà il domicilio eletto (di
+  norma la residenza), non l'ufficio: da solo non basta a dire che uno lavora a
+  Roma. Quindi la sede dichiarata su LinkedIn deve confermarlo, altrimenti il
+  candidato viene scartato. Chi non scrive nessuna sede viene scartato anch'esso:
+  in un'automazione l'assenza di prova non può valere come prova.
 
 • TRACCIABILITÀ. Ogni esecuzione lascia una riga con quanti ne ha esaminati,
   quanti avevano LinkedIn, quanti importati e perché gli altri no. Un'automazione
@@ -55,6 +62,45 @@ RISERVA_BUDGET_USD = 2.0
 # suo pianificatore. Senza, due processi potrebbero lanciare lo stesso giro e
 # pagare due volte le stesse ricerche.
 LUCCHETTO_LOOP = 918273646
+
+
+_comuni_rm = {"roma", "rome"}
+
+
+def _comuni_provincia() -> set:
+    """
+    Nomi dei comuni della provincia operativa, dal nostro stesso albo.
+    Servono a riconoscere una sede LinkedIn come «area di Roma» anche quando è
+    scritta col nome del comune (Fiumicino, Guidonia, Frascati…).
+    """
+    global _comuni_rm
+    if len(_comuni_rm) > 2:
+        return _comuni_rm
+    try:
+        db = get_db()
+        righe = db.execute(
+            "SELECT DISTINCT comune FROM ocf_iscritti WHERE provincia = ? AND COALESCE(comune,'') <> ''",
+            (PROVINCIA,)).fetchall()
+        db.close()
+        _comuni_rm = _comuni_rm | {(r["comune"] or "").strip().lower() for r in righe}
+    except Exception as e:  # pragma: no cover
+        logger.warning("Comuni di %s non leggibili: %s", PROVINCIA, e)
+    return _comuni_rm
+
+
+def lavora_a_roma(location: str) -> bool:
+    """
+    True se la sede dichiarata su LinkedIn è Roma o un comune della sua provincia.
+
+    Una sede vuota vale NO: l'automazione decide da sola, e non può prendere
+    l'assenza di informazione per una conferma.
+    """
+    testo = (location or "").strip().lower()
+    if not testo:
+        return False
+    if "roma" in testo or "rome" in testo:
+        return True
+    return any(c in testo for c in _comuni_provincia() if len(c) > 4)
 
 
 def budget_apify() -> dict:
@@ -104,7 +150,7 @@ def esegui(limite: int = AL_GIORNO, ignora_budget: bool = False) -> dict:
 
     esito = {"ok": False, "esaminati": 0, "con_linkedin": 0, "analizzati": 0,
              "importati": 0, "scartati_punteggio": 0, "senza_linkedin": 0,
-             "errori": 0, "dettaglio": [], "nota": "", "budget": None}
+             "fuori_zona": 0, "errori": 0, "dettaglio": [], "nota": "", "budget": None}
 
     # 0) Un giro alla volta, anche fra processi diversi
     conn = _get_raw_connection()
@@ -186,6 +232,18 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool) -> dict:
             continue
 
         esito["con_linkedin"] += 1
+
+        # Roma deve risultare anche da LinkedIn: l'albo dice dove abita, non
+        # dove lavora. Senza questa conferma il candidato non è del territorio.
+        sede = li.get("location", "")
+        if not lavora_a_roma(sede):
+            esito["fuori_zona"] += 1
+            albo_ocf.registra_dossier(p, linkedin_url=li.get("linkedin", ""),
+                                      esito="fuori_zona")
+            esito["dettaglio"].append({"nome": p["nome_completo"], "esito": "fuori Roma",
+                                       "motivo": f"su LinkedIn risulta «{sede or 'nessuna sede'}»"})
+            continue
+
         try:
             analisi = _analizza(p, li)
         except Exception as e:
@@ -306,11 +364,11 @@ def _registra_run(esito: dict, stato: str) -> None:
         db.execute(
             """INSERT INTO ocf_loop_run (stato, esaminati, con_linkedin, analizzati,
                                          importati, scartati_punteggio, senza_linkedin,
-                                         errori, nota, dettaglio)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                         fuori_zona, errori, nota, dettaglio)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (stato, esito["esaminati"], esito["con_linkedin"], esito["analizzati"],
              esito["importati"], esito["scartati_punteggio"], esito["senza_linkedin"],
-             esito["errori"], esito.get("nota", ""),
+             esito.get("fuori_zona", 0), esito["errori"], esito.get("nota", ""),
              _json.dumps(esito.get("dettaglio", []), ensure_ascii=False)[:4000]),
         )
         db.commit()

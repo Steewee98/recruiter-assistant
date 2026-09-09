@@ -131,10 +131,11 @@
             Ogni giorno prende <strong>{{ loop_conf.al_giorno }}</strong> consulenti dell'albo
             in provincia di <strong>{{ loop_conf.provincia }}</strong> sopra i
             <strong>{{ loop_conf.eta }} anni</strong>, partendo dai più propensi a cambiare;
-            ne cerca il profilo LinkedIn, scarta chi non ne ha uno attribuibile con certezza,
-            analizza gli altri e porta in <strong>«Da valutare»</strong> chi prende almeno
-            <strong>{{ loop_conf.soglia }}</strong>. Chi è già stato toccato non torna mai:
-            anche gli scarti restano registrati.
+            ne cerca il profilo LinkedIn e scarta chi non ne ha uno attribuibile con certezza
+            o che <strong>su LinkedIn non risulti lavorare a Roma</strong> (l'albo dà il
+            domicilio, non l'ufficio: serve la conferma della sede). Analizza gli altri e porta
+            in <strong>«Da valutare»</strong> chi prende almeno <strong>{{ loop_conf.soglia }}</strong>.
+            Chi è già stato toccato non torna mai: anche gli scarti restano registrati.
         </p>
         <div id="loop-budget" style="font-size:0.85rem;margin-bottom:0.8rem;"></div>
         <button class="btn btn-primary" id="btn-loop" onclick="eseguiLoop()">Esegui un giro adesso</button>
@@ -144,7 +145,7 @@
         {% if loop_esecuzioni %}
         <table class="table">
             <thead><tr><th>Quando</th><th>Esito</th><th>Esaminati</th><th>Con LinkedIn</th>
-                       <th>Importati</th><th>Scartati</th><th>Nota</th></tr></thead>
+                       <th>Fuori Roma</th><th>Importati</th><th>Scartati</th><th>Nota</th></tr></thead>
             <tbody>
             {% for e in loop_esecuzioni %}
                 <tr>
@@ -152,6 +153,7 @@
                     <td>{{ e.stato }}</td>
                     <td>{{ e.esaminati }}</td>
                     <td>{{ e.con_linkedin }}</td>
+                    <td>{{ e.fuori_zona or 0 }}</td>
                     <td><strong>{{ e.importati }}</strong></td>
                     <td>{{ e.scartati_punteggio + e.senza_linkedin }}</td>
                     <td style="font-size:0.8rem;color:var(--grigio-testo);">{{ e.nota }}</td>
@@ -791,6 +793,7 @@ function seguiLoop() {
             if (!e) { stato.textContent = ''; return; }
             stato.innerHTML = e.ok
                 ? '<span style="color:#166534;">Esaminati ' + e.esaminati + ' · con LinkedIn ' + e.con_linkedin
+                  + ' · fuori Roma ' + (e.fuori_zona || 0)
                   + ' · <strong>importati ' + e.importati + '</strong> · scartati '
                   + (e.scartati_punteggio + e.senza_linkedin) + '</span>'
                 : '<span style="color:#b45309;">' + esc(e.nota || 'Giro non eseguito') + '</span>';

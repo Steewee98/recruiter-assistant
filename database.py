@@ -496,6 +496,7 @@ def init_db():
             dettaglio          TEXT,
             eseguito_il        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
+        "ALTER TABLE ocf_loop_run ADD COLUMN IF NOT EXISTS fuori_zona INTEGER DEFAULT 0",
         "CREATE INDEX IF NOT EXISTS idx_ocf_loop_data ON ocf_loop_run(eseguito_il DESC)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_rete       ON ocf_iscritti(rete)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_comune     ON ocf_iscritti(comune)",
