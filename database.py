@@ -497,6 +497,9 @@ def init_db():
             eseguito_il        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
         "ALTER TABLE ocf_loop_run ADD COLUMN IF NOT EXISTS fuori_zona INTEGER DEFAULT 0",
+        # Costo Apify effettivo del giro (differenza di consumo prima/dopo): la
+        # convenienza della ricerca a gruppi va misurata, non solo prevista.
+        "ALTER TABLE ocf_loop_run ADD COLUMN IF NOT EXISTS costo NUMERIC(10,4)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_loop_data ON ocf_loop_run(eseguito_il DESC)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_rete       ON ocf_iscritti(rete)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_comune     ON ocf_iscritti(comune)",

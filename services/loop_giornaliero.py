@@ -205,6 +205,11 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool) -> dict:
 
     esito["esaminati"] = len(trovati)
 
+    # Costo reale del giro: si legge il consumo Apify prima e dopo. La
+    # convenienza della ricerca a gruppi è una previsione finché non la si
+    # misura — così il primo giro vero la conferma o la smentisce da solo.
+    usato_prima = b.get("usato") if b.get("noto") else None
+
     # 3) LinkedIn a gruppi: una sola ricerca ogni GRANDEZZA_GRUPPO persone
     profili_li = {}
     for i in range(0, len(trovati), GRANDEZZA_GRUPPO):
@@ -278,6 +283,14 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool) -> dict:
                                       punteggio=punteggio)
             esito["dettaglio"].append({"nome": p["nome_completo"], "esito": "già in pipeline",
                                        "motivo": ""})
+
+    if usato_prima is not None:
+        dopo = budget_apify()
+        if dopo.get("noto"):
+            esito["costo"] = round(max(0.0, dopo["usato"] - usato_prima), 4)
+            esito["budget"] = dopo
+            if esito["esaminati"]:
+                esito["costo_per_persona"] = round(esito["costo"] / esito["esaminati"], 4)
 
     esito["ok"] = True
     _registra_run(esito, stato="completata")
@@ -364,11 +377,12 @@ def _registra_run(esito: dict, stato: str) -> None:
         db.execute(
             """INSERT INTO ocf_loop_run (stato, esaminati, con_linkedin, analizzati,
                                          importati, scartati_punteggio, senza_linkedin,
-                                         fuori_zona, errori, nota, dettaglio)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                         fuori_zona, errori, costo, nota, dettaglio)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (stato, esito["esaminati"], esito["con_linkedin"], esito["analizzati"],
              esito["importati"], esito["scartati_punteggio"], esito["senza_linkedin"],
-             esito.get("fuori_zona", 0), esito["errori"], esito.get("nota", ""),
+             esito.get("fuori_zona", 0), esito["errori"], esito.get("costo"),
+             esito.get("nota", ""),
              _json.dumps(esito.get("dettaglio", []), ensure_ascii=False)[:4000]),
         )
         db.commit()

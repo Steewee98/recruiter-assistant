@@ -145,7 +145,8 @@
         {% if loop_esecuzioni %}
         <table class="table">
             <thead><tr><th>Quando</th><th>Esito</th><th>Esaminati</th><th>Con LinkedIn</th>
-                       <th>Fuori Roma</th><th>Importati</th><th>Scartati</th><th>Nota</th></tr></thead>
+                       <th>Fuori Roma</th><th>Importati</th><th>Scartati</th>
+                       <th>Costo</th><th>Nota</th></tr></thead>
             <tbody>
             {% for e in loop_esecuzioni %}
                 <tr>
@@ -156,6 +157,10 @@
                     <td>{{ e.fuori_zona or 0 }}</td>
                     <td><strong>{{ e.importati }}</strong></td>
                     <td>{{ e.scartati_punteggio + e.senza_linkedin }}</td>
+                    <td>{% if e.costo %}{{ '%.2f'|format(e.costo|float) }}$
+                        <span style="font-size:0.78rem;color:var(--grigio-testo);">
+                        ({{ '%.3f'|format((e.costo|float) / (e.esaminati or 1)) }}$ a testa)</span>
+                        {% else %}—{% endif %}</td>
                     <td style="font-size:0.8rem;color:var(--grigio-testo);">{{ e.nota }}</td>
                 </tr>
             {% endfor %}
