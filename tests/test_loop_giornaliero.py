@@ -35,14 +35,15 @@ class _finto_mondo:
     Sostituisce ricerca albo, ricerca LinkedIn e analisi AI per la durata del
     blocco, e ripristina tutto all'uscita.
 
-    - Anna  → LinkedIn trovato, punteggio 9  → deve entrare in pipeline
-    - Bruno → nessun profilo LinkedIn         → deve essere scartato prima dell'AI
-    - Carla → LinkedIn trovato, punteggio 4   → deve essere scartata dopo l'AI
+    - Anna  → su LinkedIn c'è, punteggio 9 → deve entrare in pipeline
+    - Bruno → su LinkedIn non compare       → non arriva nemmeno al giro
+    - Carla → su LinkedIn c'è, punteggio 4  → scartata dopo l'analisi
     """
 
-    def __init__(self, budget=None, sedi=None):
+    def __init__(self, budget=None, sedi=None, ai_viva=None):
         self.budget = budget or {"noto": True, "usato": 1.0, "tetto": 29.0, "residuo": 28.0}
         self.sedi = sedi or {}
+        self.ai_viva = ai_viva or {"ok": True}
         self.analisi_fatte = []
 
     def __enter__(self):
@@ -50,34 +51,32 @@ class _finto_mondo:
         import ai_helpers
 
         self._orig = {
-            "cerca": albo_ocf.cerca,
-            "gruppo": dossier_albo.cerca_linkedin_gruppo,
+            "raccolta": loop_giornaliero._raccogli_da_linkedin,
             "ai": ai_helpers.analizza_profilo_linkedin,
             "budget": loop_giornaliero.budget_apify,
+            "ping": ai_helpers.test_connessione_api,
         }
+        ai_helpers.test_connessione_api = lambda: self.ai_viva
         persone = _persone()
-        albo_ocf.cerca = lambda **k: {"totale": len(persone), "profili": persone[:k.get("limite", 10)],
-                                      "esclusi_lavorati": 0}
+        prova = self
 
-        prova_sedi = self
-
-        def gruppo(gente, **k):
-            self = prova_sedi
-            fuori = {}
-            for p in gente:
+        # LinkedIn restituisce i tre profili (Bruno non c'è: simula chi su
+        # LinkedIn non compare affatto)
+        def raccolta(quanti):
+            fuori = []
+            for p in persone:
                 if p["cognome"] == "Loopdue":
-                    fuori[p["chiave"]] = {"profilo": None, "omonimi": [],
-                                          "nota": "Nessun profilo LinkedIn corrispondente."}
-                else:
-                    fuori[p["chiave"]] = {"profilo": {
-                        "nome": p["nome"], "cognome": p["cognome"],
-                        "ruolo": "Consulente finanziario presso Azimut",
-                        "azienda": "Azimut", "sommario": "esperienza",
-                        "location": self.sedi.get(p["cognome"], "Rome, Latium, Italy"),
-                        "linkedin": f"https://linkedin.com/in/{p['chiave']}"},
-                        "nota": "", "omonimi": []}
-            return fuori
-        dossier_albo.cerca_linkedin_gruppo = gruppo
+                    continue
+                q = dict(p)
+                q["_linkedin"] = {
+                    "nome": p["nome"], "cognome": p["cognome"],
+                    "ruolo": "Consulente finanziario presso Azimut",
+                    "azienda": "Azimut", "sommario": "esperienza",
+                    "location": prova.sedi.get(p["cognome"], "Rome, Latium, Italy"),
+                    "linkedin": f"https://linkedin.com/in/{p['chiave']}"}
+                fuori.append(q)
+            return fuori[:quanti], 1, 25
+        loop_giornaliero._raccogli_da_linkedin = raccolta
 
         prova = self
 
@@ -93,8 +92,8 @@ class _finto_mondo:
     def __exit__(self, *e):
         from services import albo_ocf, dossier_albo, loop_giornaliero
         import ai_helpers
-        albo_ocf.cerca = self._orig["cerca"]
-        dossier_albo.cerca_linkedin_gruppo = self._orig["gruppo"]
+        loop_giornaliero._raccogli_da_linkedin = self._orig["raccolta"]
+        ai_helpers.test_connessione_api = self._orig["ping"]
         ai_helpers.analizza_profilo_linkedin = self._orig["ai"]
         loop_giornaliero.budget_apify = self._orig["budget"]
         return False
@@ -127,8 +126,7 @@ def test_giro_completo_importa_solo_chi_supera_la_soglia():
             r = L.esegui(limite=3)
 
         assert r["ok"], r
-        assert r["esaminati"] == 3
-        assert r["senza_linkedin"] == 1, "Bruno non ha LinkedIn: va scartato"
+        assert r["esaminati"] == 2, "solo chi ha un profilo LinkedIn entra nel giro"
         assert r["con_linkedin"] == 2
         assert r["analizzati"] == 2, "l'AI non deve girare su chi non ha LinkedIn"
         assert r["importati"] == 1, "solo Anna supera la soglia"
@@ -169,8 +167,8 @@ def test_ogni_persona_toccata_viene_registrata():
             "SELECT chiave, esito FROM ocf_dossier WHERE chiave LIKE 'loop_k%'").fetchall()}
         db.close()
         assert righe.get("loop_k1") == "in_pipeline"
-        assert righe.get("loop_k2") == "senza_linkedin"
         assert righe.get("loop_k3") == "scartato_punteggio"
+        assert "loop_k2" not in righe, "chi non compare su LinkedIn non viene nemmeno toccato"
     finally:
         _pulisci()
 
@@ -200,7 +198,7 @@ def test_budget_non_leggibile_non_blocca():
     try:
         with _finto_mondo(budget={"noto": False, "motivo": "rete giù"}):
             r = L.esegui(limite=3)
-        assert r["ok"] and r["esaminati"] == 3
+        assert r["ok"] and r["esaminati"] == 2
     finally:
         _pulisci()
 
@@ -215,7 +213,7 @@ def test_storico_registrato():
             L.esegui(limite=3)
         ultime = L.ultime_esecuzioni(1)
         assert ultime and ultime[0]["stato"] == "completata"
-        assert ultime[0]["importati"] == 1 and ultime[0]["senza_linkedin"] == 1
+        assert ultime[0]["importati"] == 1 and ultime[0]["scartati_punteggio"] == 1
         assert "Loopuno" in (ultime[0]["dettaglio"] or ""), "il dettaglio deve dire chi e perché"
         db = get_db()
         db.execute("DELETE FROM ocf_loop_run WHERE id = ?", (ultime[0]["id"],))
@@ -255,6 +253,28 @@ def test_riconoscimento_sede_romana():
     assert not lavora_a_roma("Lazio, Italia"), "la sola regione non basta"
     assert not lavora_a_roma(""), "sede vuota non è una conferma"
     assert not lavora_a_roma(None)
+
+
+def test_non_spende_in_ricerche_se_lai_e_giu():
+    """
+    Il caso costato davvero 0,30 $: dieci candidati trovati e nessuno
+    analizzabile perché il credito AI era finito. Ora si verifica prima.
+    """
+    from services import loop_giornaliero as L
+
+    _pulisci()
+    ricerche_fatte = []
+    originale = L._raccogli_da_linkedin
+    L._raccogli_da_linkedin = lambda q: (ricerche_fatte.append(1), ([], 1, 0))[1]
+    try:
+        with _finto_mondo(ai_viva={"ok": False, "errore": "credit balance is too low"}):
+            r = L.esegui(limite=10)
+        assert not r["ok"]
+        assert "AI non risponde" in r["nota"], r["nota"]
+        assert not ricerche_fatte, "non deve partire nessuna ricerca a pagamento"
+    finally:
+        L._raccogli_da_linkedin = originale
+        _pulisci()
 
 
 if __name__ == "__main__":

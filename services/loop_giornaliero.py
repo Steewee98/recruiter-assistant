@@ -2,13 +2,25 @@
 Loop giornaliero: porta ogni giorno nuovi consulenti in «Da valutare».
 
 Cosa fa, una volta al giorno:
-  1. prende dall'albo OCF i consulenti di ROMA (provincia) sopra i 30 anni,
-     ordinati per propensione al cambio, saltando chi è già stato lavorato;
-  2. ne cerca il profilo LinkedIn — tutti insieme, in un'unica ricerca;
-  3. scarta chi non ha un profilo LinkedIn attribuibile con certezza, e chi su
-     LinkedIn NON risulta lavorare a Roma;
-  4. sui restanti lancia l'analisi AI;
+  1. cerca su LinkedIn consulenti finanziari CON SEDE A ROMA (poche ricerche, a
+     ruoli e pagine ruotanti, così ogni giorno esce gente diversa);
+  2. incrocia i profili trovati con l'albo OCF: tiene solo chi risulta iscritto,
+     in provincia di Roma, sopra i 30 anni, con un mandato e non già in Fideuram;
+  3. ordina i superstiti per propensione al cambio e scarta chi è già stato
+     lavorato;
+  4. lancia l'analisi AI sui primi AL_GIORNO;
   5. chi prende almeno PUNTEGGIO_MINIMO entra in pipeline come «Da valutare».
+
+⚠️ PERCHÉ IL FLUSSO PARTE DA LINKEDIN E NON DALL'ALBO. La prima versione faceva
+il contrario: prendeva i più propensi dall'albo e ne cercava il profilo LinkedIn
+uno per uno. Provata sul campo, è risultata sbagliata due volte:
+  • l'actor si paga 0,10 $ A RICERCA, non a persona: una ricerca per nome serve
+    UNA persona, una per ruolo+città ne serve venticinque;
+  • cercare più nomi insieme non funziona — l'actor incrocia nomi e cognomi e
+    restituisce una sola combinazione (chiedendo cinque persone tornavano dieci
+    omonimi di «Alessia Colasanti», che non era nessuna delle cinque).
+Il giro reale del 10/09 ha fatto 10 esaminati, 0 trovati, 0,27 $ spesi. Partendo
+da LinkedIn, la stessa spesa rende ~2 candidati validi per ricerca.
 
 Tre vincoli che hanno guidato il progetto:
 
@@ -50,9 +62,18 @@ ETA_MINIMA = 31          # "sopra i 30 anni"
 PUNTEGGIO_MINIMO = 7     # entra in «Da valutare» da 7 in su
 AL_GIORNO = 10
 
-# Quante persone per singola ricerca Apify. Cinque è il compromesso: meno run da
-# pagare, ma non tanti nomi da far sparire i meno comuni fra i risultati.
-GRANDEZZA_GRUPPO = 5
+# Ruoli con cui interrogare LinkedIn, a rotazione: cambiando ruolo ogni giorno
+# si pescano persone diverse senza pagare pagine in più.
+RUOLI_LINKEDIN = [
+    "consulente finanziario", "private banker", "wealth manager",
+    "consulente patrimoniale", "financial advisor", "promotore finanziario",
+]
+
+# Quante ricerche LinkedIn al massimo per giro. Ogni ricerca costa ~0,10 $ e
+# rende in media 2 candidati validi: quattro sono il tetto di spesa giornaliero
+# (~0,40 $) oltre il quale non vale la pena insistere.
+MAX_RICERCHE = 4
+PROFILI_PER_RICERCA = 25
 
 # Budget Apify da lasciare intatto per le ricerche fatte a mano. Sotto questa
 # soglia l'automazione si ferma da sola.
@@ -150,7 +171,9 @@ def esegui(limite: int = AL_GIORNO, ignora_budget: bool = False) -> dict:
 
     esito = {"ok": False, "esaminati": 0, "con_linkedin": 0, "analizzati": 0,
              "importati": 0, "scartati_punteggio": 0, "senza_linkedin": 0,
-             "fuori_zona": 0, "errori": 0, "dettaglio": [], "nota": "", "budget": None}
+             "fuori_zona": 0, "errori": 0, "dettaglio": [], "nota": "", "budget": None,
+             "costo": None, "costo_per_persona": None,
+             "ricerche": 0, "profili_linkedin": 0}
 
     # 0) Un giro alla volta, anche fra processi diversi
     conn = _get_raw_connection()
@@ -186,65 +209,50 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool) -> dict:
         _registra_run(esito, stato="saltata_budget")
         return esito
 
-    # 2) Chi lavorare oggi
+    # 1-bis) L'AI risponde? Si verifica PRIMA di spendere in ricerche.
+    #        Il giro del 10/09 ha bruciato 0,30 $ di ricerche per poi scoprire
+    #        che il credito Anthropic era finito: dieci candidati trovati e
+    #        nessuno analizzabile. Una chiamata da dieci token lo evita.
+    from ai_helpers import test_connessione_api
+    prova_ai = test_connessione_api()
+    if not prova_ai.get("ok"):
+        from ai_helpers import messaggio_errore_ai
+        esito["nota"] = ("Saltato: l'AI non risponde, e senza analisi le ricerche "
+                         "sarebbero soldi buttati — " + messaggio_errore_ai(Exception(prova_ai.get("errore", ""))))
+        _registra_run(esito, stato="saltata_ai")
+        return esito
+
+    # 2) LinkedIn per primo: è il passo che si paga, e una sola ricerca serve
+    #    venticinque persone invece di una.
+    usato_prima = b.get("usato") if b.get("noto") else None
     try:
-        trovati = albo_ocf.cerca(provincia=PROVINCIA, eta_min=ETA_MINIMA,
-                                 limite=limite, escludi_lavorati=True)["profili"]
+        candidati, ricerche, visti = _raccogli_da_linkedin(limite)
     except Exception as e:
-        logger.error("Loop: ricerca albo fallita: %s", e, exc_info=True)
-        esito["nota"] = f"Ricerca nell'albo non riuscita: {e}"
+        logger.error("Loop: raccolta da LinkedIn fallita: %s", e, exc_info=True)
+        esito["nota"] = f"Ricerca LinkedIn non riuscita: {e}"
         _registra_run(esito, stato="errore")
         return esito
 
-    if not trovati:
+    esito["ricerche"] = ricerche
+    esito["profili_linkedin"] = visti
+    esito["esaminati"] = len(candidati)
+
+    if not candidati:
         esito["ok"] = True
-        esito["nota"] = ("Nessun consulente nuovo con questi criteri "
-                         f"(provincia {PROVINCIA}, oltre {ETA_MINIMA - 1} anni).")
+        esito["nota"] = (f"{visti} profili LinkedIn esaminati in {ricerche} ricerche, "
+                         "nessuno nuovo che risulti anche nell'albo di Roma sopra i 30 anni.")
         _registra_run(esito, stato="nulla_da_fare")
         return esito
 
-    esito["esaminati"] = len(trovati)
-
-    # Costo reale del giro: si legge il consumo Apify prima e dopo. La
-    # convenienza della ricerca a gruppi è una previsione finché non la si
-    # misura — così il primo giro vero la conferma o la smentisce da solo.
-    usato_prima = b.get("usato") if b.get("noto") else None
-
-    # 3) LinkedIn a gruppi: una sola ricerca ogni GRANDEZZA_GRUPPO persone
-    profili_li = {}
-    for i in range(0, len(trovati), GRANDEZZA_GRUPPO):
-        gruppo = trovati[i:i + GRANDEZZA_GRUPPO]
-        try:
-            profili_li.update(dossier_albo.cerca_linkedin_gruppo(gruppo))
-        except Exception as e:
-            logger.error("Loop: ricerca LinkedIn fallita: %s", e, exc_info=True)
-            esito["errori"] += 1
-
-    # 4) Analisi e importazione
-    for p in trovati:
-        ris = profili_li.get(p["chiave"]) or {}
-        li = ris.get("profilo")
-        nota_li = ris.get("nota") or ""
-
-        # Senza un profilo attribuibile con certezza non si va avanti: l'analisi
-        # su un omonimo sbagliato produrrebbe un candidato inventato.
-        incerto = bool(nota_li) and ("verificare" in nota_li or "arbitraria" in nota_li)
-        if not li or incerto:
-            esito["senza_linkedin"] += 1
-            albo_ocf.registra_dossier(p, esito="senza_linkedin")
-            esito["dettaglio"].append({"nome": p["nome_completo"], "esito": "senza LinkedIn",
-                                       "motivo": nota_li or "nessun profilo attribuibile"})
-            continue
-
+    # 3) Analisi e importazione
+    for p in candidati:
+        li = p.pop("_linkedin")
         esito["con_linkedin"] += 1
 
-        # Roma deve risultare anche da LinkedIn: l'albo dice dove abita, non
-        # dove lavora. Senza questa conferma il candidato non è del territorio.
         sede = li.get("location", "")
         if not lavora_a_roma(sede):
             esito["fuori_zona"] += 1
-            albo_ocf.registra_dossier(p, linkedin_url=li.get("linkedin", ""),
-                                      esito="fuori_zona")
+            albo_ocf.registra_dossier(p, linkedin_url=li.get("linkedin", ""), esito="fuori_zona")
             esito["dettaglio"].append({"nome": p["nome_completo"], "esito": "fuori Roma",
                                        "motivo": f"su LinkedIn risulta «{sede or 'nessuna sede'}»"})
             continue
@@ -255,8 +263,14 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool) -> dict:
             from ai_helpers import messaggio_errore_ai
             logger.error("Loop: analisi fallita per %s: %s", p["nome_completo"], e)
             esito["errori"] += 1
+            messaggio = messaggio_errore_ai(e)
             esito["dettaglio"].append({"nome": p["nome_completo"], "esito": "errore analisi",
-                                       "motivo": messaggio_errore_ai(e)})
+                                       "motivo": messaggio})
+            # Credito finito o chiave non valida: gli altri falliranno uguale.
+            # Ci si ferma qui e li si lascia liberi per il giro di domani.
+            if any(x in messaggio.lower() for x in ("credito", "autenticazione", "chiave")):
+                esito["nota"] = f"Interrotto dopo {esito['analizzati']} analisi — {messaggio}"
+                break
             continue
 
         esito["analizzati"] += 1
@@ -279,8 +293,7 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool) -> dict:
             esito["dettaglio"].append({"nome": p["nome_completo"], "esito": "importato",
                                        "motivo": f"punteggio {punteggio}"})
         else:
-            albo_ocf.registra_dossier(p, linkedin_url=url, esito="gia_presente",
-                                      punteggio=punteggio)
+            albo_ocf.registra_dossier(p, linkedin_url=url, esito="gia_presente", punteggio=punteggio)
             esito["dettaglio"].append({"nome": p["nome_completo"], "esito": "già in pipeline",
                                        "motivo": ""})
 
@@ -297,6 +310,94 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool) -> dict:
     logger.info("Loop giornaliero: %d esaminati, %d con LinkedIn, %d importati",
                 esito["esaminati"], esito["con_linkedin"], esito["importati"])
     return esito
+
+
+def _raccogli_da_linkedin(quanti: int):
+    """
+    Cerca su LinkedIn consulenti con sede a Roma e tiene solo quelli che
+    risultano anche nell'albo, in provincia di Roma, sopra i 30 anni, con un
+    mandato e non già in Fideuram.
+
+    Ritorna (candidati_ordinati_per_propensione, n_ricerche, n_profili_visti).
+    Ogni candidato porta con sé il profilo LinkedIn in "_linkedin".
+    """
+    from routes.ricerca import cerca_apify, normalizza_profilo
+    from services import propensione
+
+    # Ruolo e pagina ruotano in base al giorno: senza rotazione ogni giro
+    # ripescherebbe gli stessi primi venticinque profili.
+    giorno = date.today().toordinal()
+    candidati, visti, ricerche = [], 0, 0
+    gia_presi = set()
+
+    for tentativo in range(MAX_RICERCHE):
+        if len(candidati) >= quanti:
+            break
+        ruolo = RUOLI_LINKEDIN[(giorno + tentativo) % len(RUOLI_LINKEDIN)]
+        pagina = ((giorno + tentativo) // len(RUOLI_LINKEDIN)) % 5 + 1
+        items, errore = cerca_apify(
+            ruolo=ruolo, citta="Roma", max_items=PROFILI_PER_RICERCA,
+            start_page=pagina, max_wait=120, modalita="Short",
+        )
+        ricerche += 1
+        if errore:
+            logger.warning("Loop: ricerca «%s» pagina %d non riuscita: %s", ruolo, pagina, errore)
+            continue
+
+        visti += len(items or [])
+        for item in (items or []):
+            if not isinstance(item, dict):
+                continue
+            li = normalizza_profilo(item)
+            riga = _cerca_nellalbo(li.get("nome", ""), li.get("cognome", ""))
+            if not riga or riga["chiave"] in gia_presi:
+                continue
+            gia_presi.add(riga["chiave"])
+            riga["_linkedin"] = li
+            riga["propensione"] = propensione.coefficiente(riga.get("rete", ""), riga.get("eta"))
+            candidati.append(riga)
+
+    candidati.sort(key=lambda c: -(c["propensione"].get("indice") or 0))
+    return candidati[:quanti], ricerche, visti
+
+
+def _cerca_nellalbo(nome: str, cognome: str):
+    """
+    Cerca il nominativo nell'albo con i criteri del giro: provincia operativa,
+    sopra l'età minima, con mandato, non Fideuram, non già lavorato né in
+    pipeline. Ritorna la riga pronta all'uso oppure None.
+    """
+    nome, cognome = (nome or "").strip(), (cognome or "").strip()
+    if not nome or not cognome:
+        return None
+    anno_limite = date.today().year - ETA_MINIMA
+    db = get_db()
+    try:
+        r = db.execute("""
+            SELECT chiave, nome, cognome, anno_nascita, comune, provincia, rete, n_cambi
+              FROM ocf_iscritti
+             WHERE attivo = TRUE AND provincia = ? AND COALESCE(rete,'') <> '' AND rete <> ?
+               AND LOWER(nome) = LOWER(?) AND LOWER(cognome) = LOWER(?)
+               AND anno_nascita IS NOT NULL AND anno_nascita <= ?
+               AND chiave NOT IN (SELECT chiave FROM ocf_dossier)
+               AND NOT EXISTS (SELECT 1 FROM candidati c
+                                WHERE LOWER(c.nome) = LOWER(ocf_iscritti.nome)
+                                  AND LOWER(c.cognome) = LOWER(ocf_iscritti.cognome))
+             LIMIT 1
+        """, (PROVINCIA, albo_rete_propria(), nome, cognome, anno_limite)).fetchone()
+    finally:
+        db.close()
+    if not r:
+        return None
+    d = dict(r)
+    d["eta"] = date.today().year - d["anno_nascita"] if d.get("anno_nascita") else None
+    d["nome_completo"] = f"{d.get('nome','')} {d.get('cognome','')}".strip()
+    return d
+
+
+def albo_rete_propria() -> str:
+    from services.albo_ocf import RETE_PROPRIA
+    return RETE_PROPRIA
 
 
 def _analizza(profilo: dict, linkedin: dict) -> dict:

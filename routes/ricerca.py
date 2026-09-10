@@ -410,7 +410,7 @@ def _matches_citta(location: str, citta_target: str) -> bool:
 
 def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pagine=1,
                 ruoli_lista=None, forza_italia=True, progress_cb=None, start_page=1,
-                max_items=10, max_wait=180, cerca_nome=None):
+                max_items=10, max_wait=180, cerca_nome=None, modalita="Full"):
     """
     Flusso asincrono Apify in due step:
       STEP 1 — POST /acts/{actor}/runs  → avvia run, ottieni run_id
@@ -424,6 +424,11 @@ def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pag
     (Le ricerche testuali per nome tornavano gente a caso: il campo `keywords`
     non esiste nello schema dell'actor e veniva ignorato in silenzio — il campo
     di ricerca libera si chiama `searchQuery`.)
+
+    `modalita` sceglie il listino dell'actor:
+      • "Full"  → 0,10 $ a ricerca + 0,004 $ per profilo (dati completi)
+      • "Short" → 0,10 $ a ricerca, fino a 25 profili, senza costo per profilo
+    Per il giro automatico basta la scheda breve: nome, headline, azienda e sede.
 
     Restituisce (lista_profili, errore).
     """
@@ -442,6 +447,7 @@ def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pag
         cognomi = cognome_p if isinstance(cognome_p, (list, tuple)) else ([cognome_p] if cognome_p else [])
         run_input = {
             "maxItems": max_items,
+            "profileScraperMode": modalita,
             "firstNames": [n for n in nomi if n],
             "lastNames": [c for c in cognomi if c],
             "locations": [_normalizza_citta(citta)] if citta else ["Italy"],
@@ -454,6 +460,7 @@ def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pag
         "takePages": num_pagine,
         "startPage": max(1, start_page),   # offset: varia ad ogni ricerca
         "maxItems": max_items,             # rinominato da maxResults nella nuova versione actor
+        "profileScraperMode": modalita,
     }
 
     # Titoli di lavoro correnti — usa lista se fornita, altrimenti singolo ruolo
