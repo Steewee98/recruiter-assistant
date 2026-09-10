@@ -202,11 +202,23 @@ def budget_apify() -> dict:
         return {"noto": False, "motivo": str(e)}
 
 
+# Esiti che consumano la giornata: il lavoro è stato fatto (o non c'era niente
+# da fare). Un giro SALTATO — credito AI finito, budget esaurito, un altro
+# processo che teneva il lucchetto — non conta: altrimenti un intoppo passeggero
+# delle 6 del mattino brucerebbe l'intera giornata, e ci si accorgerebbe il
+# giorno dopo che non è entrato nessuno.
+ESITI_CHE_CONTANO = ("completata", "nulla_da_fare")
+
+
 def gia_eseguito_oggi() -> bool:
     db = get_db()
     try:
+        segnaposto = ",".join(["?"] * len(ESITI_CHE_CONTANO))
         r = db.execute(
-            "SELECT COUNT(*) AS n FROM ocf_loop_run WHERE DATE(eseguito_il) = CURRENT_DATE"
+            f"""SELECT COUNT(*) AS n FROM ocf_loop_run
+                 WHERE DATE(eseguito_il) = CURRENT_DATE
+                   AND stato IN ({segnaposto})""",
+            list(ESITI_CHE_CONTANO),
         ).fetchone()
         return (r or {}).get("n", 0) > 0
     except Exception:

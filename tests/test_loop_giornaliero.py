@@ -337,6 +337,51 @@ def test_sede_fuori_italia_o_regione_omonima_non_passa():
     assert lavora_a_roma("Fiumicino, Lazio, Italy")
 
 
+def test_un_giro_saltato_non_consuma_la_giornata():
+    """
+    Se alle 6 del mattino manca il credito AI, il giro viene saltato: non deve
+    valere come «fatto per oggi», altrimenti si perde l'intera giornata e ce ne
+    si accorge domani.
+    """
+    from database import get_db
+    from services import loop_giornaliero as L
+
+    def quanti_contano():
+        """Giri di oggi che consumano la giornata (compresi quelli veri già in archivio)."""
+        db = get_db()
+        try:
+            segnaposto = ",".join(["?"] * len(L.ESITI_CHE_CONTANO))
+            return db.execute(
+                f"""SELECT COUNT(*) AS n FROM ocf_loop_run
+                     WHERE DATE(eseguito_il) = CURRENT_DATE AND stato IN ({segnaposto})""",
+                list(L.ESITI_CHE_CONTANO)).fetchone()["n"]
+        finally:
+            db.close()
+
+    da_id = _ultimo_id_storico()
+    _pulisci(da_id)
+    try:
+        # Il conteggio parte da quello che c'è già: il test non deve dipendere
+        # dal fatto che oggi sia stato eseguito un giro vero.
+        base = quanti_contano()
+
+        with _finto_mondo(ai_viva={"ok": False, "errore": "credit balance is too low"}):
+            L.esegui(limite=3)
+        assert quanti_contano() == base, "un giro saltato per AI giù non consuma la giornata"
+
+        with _finto_mondo(budget={"noto": True, "usato": 34.8, "tetto": 35.0,
+                                  "residuo": 0.2, "fine_ciclo": "2026-09-18"}):
+            L.esegui(limite=3)
+        assert quanti_contano() == base, "nemmeno un giro saltato per budget"
+
+        with _finto_mondo():
+            L.esegui(limite=3)
+        assert quanti_contano() == base + 1, "un giro completato invece sì"
+        assert L.gia_eseguito_oggi()
+    finally:
+        _pulisci(da_id)
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv
