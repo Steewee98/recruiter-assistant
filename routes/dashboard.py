@@ -60,7 +60,7 @@ def _get_stats():
 
     ultimi = [dict(r) for r in db.execute(
         """SELECT id, nome, cognome, ruolo_attuale, stato, punteggio,
-                  tipo_profilo, gestore, data_inserimento
+                  tipo_profilo, gestore, profilo_linkedin, data_inserimento
            FROM candidati ORDER BY data_inserimento DESC LIMIT 5"""
     ).fetchall()]
 
@@ -133,7 +133,7 @@ def candidati_per_stato(stato):
             if sub == "Richiesta Inviata":
                 rows = db.execute(
                     """SELECT id, nome, cognome, ruolo_attuale, azienda,
-                              tipo_profilo, punteggio, gestore, stato,
+                              tipo_profilo, punteggio, gestore, stato, profilo_linkedin,
                               analisi, spunti, messaggio_outreach, data_inserimento
                        FROM candidati
                        WHERE stato IN (?, 'Contattati')
@@ -143,7 +143,7 @@ def candidati_per_stato(stato):
             else:
                 rows = db.execute(
                     """SELECT id, nome, cognome, ruolo_attuale, azienda,
-                              tipo_profilo, punteggio, gestore, stato,
+                              tipo_profilo, punteggio, gestore, stato, profilo_linkedin,
                               analisi, spunti, messaggio_outreach, data_inserimento
                        FROM candidati
                        WHERE stato = ?
@@ -163,7 +163,7 @@ def candidati_per_stato(stato):
     db = get_db()
     rows = db.execute(
         """SELECT id, nome, cognome, ruolo_attuale, azienda,
-                  tipo_profilo, punteggio, gestore, stato,
+                  tipo_profilo, punteggio, gestore, stato, profilo_linkedin,
                   analisi, spunti, messaggio_outreach, data_inserimento
            FROM candidati
            WHERE stato = ?

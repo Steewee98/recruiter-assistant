@@ -515,8 +515,17 @@ function _rigaCandidato(c) {
     + "style='--select-color:" + (STATO_COLORS[c.stato] || '#6B7A99') + "'>"
     + statoOpts + "</select>";
 
+  // Link al profilo LinkedIn sotto al nome: da qui parte la telefonata, avere
+  // l'indirizzo a portata evita di ricercarlo a mano ogni volta.
+  var linkLi = "";
+  if (c.profilo_linkedin) {
+    linkLi = "<a href='" + escHtml(c.profilo_linkedin) + "' target='_blank' rel='noopener' "
+           + "class='candidato-linkedin' title='" + escHtml(c.profilo_linkedin) + "'>"
+           + "&#128279; profilo LinkedIn</a>";
+  }
+
   return "<tr data-candidato-id='" + c.id + "'>"
-    + "<td><div class='candidato-nome'>" + nome + "</div></td>"
+    + "<td><div class='candidato-nome'>" + nome + "</div>" + linkLi + "</td>"
     + "<td><div>" + ruolo + "</div><div class='candidato-meta'>" + azienda + "</div></td>"
     + "<td>" + pBadge + "</td>"
     + "<td>" + puntHtml + "</td>"
@@ -888,6 +897,18 @@ function apriReportDashboard(candidatoId) {
   background: var(--azzurro, #2E7CF6);
   color: #fff;
 }
+.candidato-linkedin {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: .78rem;
+  color: var(--azzurro, #2E7CF6);
+  text-decoration: none;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.candidato-linkedin:hover { text-decoration: underline; }
 </style>
 
 {% endblock %}
