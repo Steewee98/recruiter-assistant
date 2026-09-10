@@ -48,6 +48,8 @@ Tre vincoli che hanno guidato il progetto:
 
 import logging
 import os
+import re
+import unicodedata
 from datetime import date
 
 import requests
@@ -103,25 +105,77 @@ def _comuni_provincia() -> set:
             "SELECT DISTINCT comune FROM ocf_iscritti WHERE provincia = ? AND COALESCE(comune,'') <> ''",
             (PROVINCIA,)).fetchall()
         db.close()
-        _comuni_rm = _comuni_rm | {(r["comune"] or "").strip().lower() for r in righe}
+        _comuni_rm = _comuni_rm | {p for r in righe
+                                   for p in _pezzi_sede(r["comune"] or "")}
     except Exception as e:  # pragma: no cover
         logger.warning("Comuni di %s non leggibili: %s", PROVINCIA, e)
     return _comuni_rm
+
+
+# Parole di contorno nelle sedi LinkedIn: vanno tolte prima del confronto,
+# altrimenti «Rome Metropolitan Area» non corrisponde a «Roma».
+_RUMORE_SEDE = ("metropolitan area", "metropolitan", "greater", "area",
+                "provincia di", "province of", "citta metropolitana di",
+                "citta metropolitana", "region", "regione")
+
+
+def _pezzi_sede(location: str) -> list:
+    """
+    Spezza una sede LinkedIn nei suoi componenti geografici, normalizzati.
+    «Rome, Latium, Italy» → ['rome', 'latium', 'italy'].
+    """
+    piatto = unicodedata.normalize("NFKD", location or "")
+    piatto = "".join(c for c in piatto if not unicodedata.combining(c)).lower()
+    pezzi = []
+    for grezzo in re.split(r"[,/|]", piatto):
+        pezzo = grezzo.strip()
+        for rumore in _RUMORE_SEDE:
+            pezzo = pezzo.replace(rumore, " ")
+        pezzo = re.sub(r"[^a-z0-9' ]+", " ", pezzo)
+        pezzo = re.sub(r"\s+", " ", pezzo).strip()
+        if pezzo:
+            pezzi.append(pezzo)
+    return pezzi
 
 
 def lavora_a_roma(location: str) -> bool:
     """
     True se la sede dichiarata su LinkedIn è Roma o un comune della sua provincia.
 
+    Il confronto è per COMPONENTE INTERA, non per sottostringa. Cercare "roma"
+    dentro il testo sembrava innocuo e invece faceva passare mezza Italia:
+    «Bologna, Emilia-Romagna» contiene "roma", e così «Bucharest, Romania» e
+    «Forlì, Emilia-Romagna». Un'automazione che importa candidati da Bologna
+    perché la regione si chiama Romagna è peggio di un'automazione che non
+    importa niente.
+
     Una sede vuota vale NO: l'automazione decide da sola, e non può prendere
     l'assenza di informazione per una conferma.
     """
-    testo = (location or "").strip().lower()
-    if not testo:
+    pezzi = _pezzi_sede(location)
+    if not pezzi:
         return False
-    if "roma" in testo or "rome" in testo:
-        return True
-    return any(c in testo for c in _comuni_provincia() if len(c) > 4)
+
+    # Se il paese è dichiarato e non è l'Italia, è fuori a prescindere.
+    paesi_ok = {"italy", "italia", "it"}
+    ultimo = pezzi[-1]
+    if len(pezzi) > 1 and ultimo not in paesi_ok and ultimo in _PAESI_NOTI:
+        return False
+
+    ammessi = {"roma", "rome"} | _comuni_provincia()
+    return any(p in ammessi for p in pezzi)
+
+
+# Paesi che compaiono spesso come ultimo componente di una sede LinkedIn: se
+# c'è un paese e non è l'Italia, la sede è fuori zona qualunque cosa dica il resto.
+_PAESI_NOTI = {
+    "italy", "italia", "romania", "france", "francia", "spain", "spagna",
+    "germany", "germania", "switzerland", "svizzera", "united kingdom", "uk",
+    "united states", "usa", "belgium", "belgio", "austria", "portugal",
+    "portogallo", "netherlands", "olanda", "poland", "polonia", "greece",
+    "grecia", "san marino", "monaco", "luxembourg", "lussemburgo", "malta",
+    "croatia", "croazia", "slovenia", "albania", "brazil", "brasile",
+}
 
 
 def budget_apify() -> dict:
@@ -285,17 +339,22 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool) -> dict:
                                        "motivo": f"punteggio {punteggio}"})
             continue
 
-        cid = _importa(p, li, analisi)
-        if cid:
+        cid, come = _importa(p, li, analisi)
+        if come == "ok":
             esito["importati"] += 1
             albo_ocf.registra_dossier(p, linkedin_url=url, esito="in_pipeline",
                                       punteggio=punteggio, candidato_id=cid)
             esito["dettaglio"].append({"nome": p["nome_completo"], "esito": "importato",
                                        "motivo": f"punteggio {punteggio}"})
-        else:
+        elif come == "duplicato":
             albo_ocf.registra_dossier(p, linkedin_url=url, esito="gia_presente", punteggio=punteggio)
             esito["dettaglio"].append({"nome": p["nome_completo"], "esito": "già in pipeline",
                                        "motivo": ""})
+        else:
+            # Errore tecnico: NON si registra nulla, così domani si riprova.
+            esito["errori"] += 1
+            esito["dettaglio"].append({"nome": p["nome_completo"], "esito": "errore salvataggio",
+                                       "motivo": "riprovato al prossimo giro"})
 
     if usato_prima is not None:
         dopo = budget_apify()
@@ -422,9 +481,16 @@ def _analizza(profilo: dict, linkedin: dict) -> dict:
 
 def _importa(profilo: dict, linkedin: dict, analisi: dict):
     """
-    Inserisce il candidato in «Da valutare». Ritorna l'id, o None se risulta
-    già in pipeline. Lo stato è «Da valutare» e non «Da contattare» proprio
-    perché la scelta l'ha fatta una macchina: prima ci passa una persona.
+    Inserisce il candidato in «Da valutare».
+    Ritorna (id, esito) con esito in {"ok", "duplicato", "errore"}.
+
+    I tre casi vanno distinti, non ridotti a "id oppure None": un INSERT fallito
+    per un problema tecnico verrebbe scambiato per un duplicato, la persona
+    finirebbe segnata come già lavorata e sparirebbe per sempre dai giri
+    successivi senza essere mai stata importata.
+
+    Lo stato è «Da valutare» e non «Da contattare» perché la scelta l'ha fatta
+    una macchina: prima ci passa una persona.
     """
     import json as _json
 
@@ -440,7 +506,7 @@ def _importa(profilo: dict, linkedin: dict, analisi: dict):
             "azienda": profilo.get("rete", ""), "linkedin": url,
         })
         if dup:
-            return None
+            return None, "duplicato"
 
         prop = profilo.get("propensione") or {}
         citta = ", ".join(x for x in [profilo.get("comune", ""), profilo.get("provincia", "")] if x)
@@ -463,10 +529,10 @@ def _importa(profilo: dict, linkedin: dict, analisi: dict):
              "Salvatore Sabia" if tipo == "A" else "Firdaous Filahi"),
         )
         db.commit()
-        return cur.lastrowid
+        return cur.lastrowid, "ok"
     except Exception as e:
         logger.error("Loop: inserimento fallito: %s", e, exc_info=True)
-        return None
+        return None, "errore"
     finally:
         db.close()
 

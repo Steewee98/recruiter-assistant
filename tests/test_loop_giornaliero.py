@@ -99,19 +99,35 @@ class _finto_mondo:
         return False
 
 
-def _pulisci():
+def _ultimo_id_storico() -> int:
+    """Id più alto in ocf_loop_run PRIMA del test: tutto ciò che nasce dopo è nostro."""
+    from database import get_db
+    db = get_db()
+    try:
+        r = db.execute("SELECT COALESCE(MAX(id), 0) AS m FROM ocf_loop_run").fetchone()
+        return (r or {}).get("m", 0) or 0
+    finally:
+        db.close()
+
+
+def _pulisci(da_id: int = None):
+    """
+    Rimuove SOLO ciò che il test ha creato.
+
+    I test girano sullo stesso database dell'applicazione (il progetto non ne ha
+    uno separato), quindi la pulizia dev'essere chirurgica: cancellare per
+    somiglianza di testo — «tutte le righe che contengono Loop», «la nota che
+    cita 28.5» — rischia di portarsi via storico vero, perché una nota reale
+    può benissimo contenere quel numero. Si cancellano gli id nati dopo l'inizio
+    del test e i nominativi inventati, nient'altro.
+    """
     from database import get_db
     db = get_db()
     for c in COGNOMI_PROVA:
         db.execute("DELETE FROM candidati WHERE cognome = ?", (c,))
     db.execute("DELETE FROM ocf_dossier WHERE chiave IN ('loop_k1','loop_k2','loop_k3')")
-    # Le righe di storico create dai test vanno via: `esegui()` ne scrive una a
-    # ogni giro, e i nomi finti sono l'unico modo per riconoscerle senza toccare
-    # lo storico vero.
-    db.execute("DELETE FROM ocf_loop_run WHERE dettaglio LIKE '%Loop%'")
-    db.execute("""DELETE FROM ocf_loop_run
-                   WHERE stato = 'saltata_budget'
-                     AND nota LIKE '%28.5%'""")
+    if da_id is not None:
+        db.execute("DELETE FROM ocf_loop_run WHERE id > ?", (da_id,))
     db.commit()
     db.close()
 
@@ -120,7 +136,8 @@ def test_giro_completo_importa_solo_chi_supera_la_soglia():
     from database import get_db
     from services import loop_giornaliero as L
 
-    _pulisci()
+    da_id = _ultimo_id_storico()
+    _pulisci(da_id)
     try:
         with _finto_mondo() as mondo:
             r = L.esegui(limite=3)
@@ -150,7 +167,7 @@ def test_giro_completo_importa_solo_chi_supera_la_soglia():
         assert riga["source"] == "ocf"
         assert "loop giornaliero" in (riga["note"] or "")
     finally:
-        _pulisci()
+        _pulisci(da_id)
 
 
 def test_ogni_persona_toccata_viene_registrata():
@@ -158,7 +175,8 @@ def test_ogni_persona_toccata_viene_registrata():
     from database import get_db
     from services import loop_giornaliero as L
 
-    _pulisci()
+    da_id = _ultimo_id_storico()
+    _pulisci(da_id)
     try:
         with _finto_mondo():
             L.esegui(limite=3)
@@ -170,14 +188,15 @@ def test_ogni_persona_toccata_viene_registrata():
         assert righe.get("loop_k3") == "scartato_punteggio"
         assert "loop_k2" not in righe, "chi non compare su LinkedIn non viene nemmeno toccato"
     finally:
-        _pulisci()
+        _pulisci(da_id)
 
 
 def test_si_ferma_se_il_budget_e_finito():
     """Il freno che evita di consumare i soldi delle ricerche a mano."""
     from services import loop_giornaliero as L
 
-    _pulisci()
+    da_id = _ultimo_id_storico()
+    _pulisci(da_id)
     try:
         with _finto_mondo(budget={"noto": True, "usato": 28.5, "tetto": 29.0,
                                   "residuo": 0.5, "fine_ciclo": "2026-09-18"}) as mondo:
@@ -187,27 +206,29 @@ def test_si_ferma_se_il_budget_e_finito():
         assert "budget" in r["nota"].lower()
         assert not mondo.analisi_fatte, "nessuna chiamata AI a budget esaurito"
     finally:
-        _pulisci()
+        _pulisci(da_id)
 
 
 def test_budget_non_leggibile_non_blocca():
     """Se Apify non risponde sul budget non ci si ferma: si prova, con cautela."""
     from services import loop_giornaliero as L
 
-    _pulisci()
+    da_id = _ultimo_id_storico()
+    _pulisci(da_id)
     try:
         with _finto_mondo(budget={"noto": False, "motivo": "rete giù"}):
             r = L.esegui(limite=3)
         assert r["ok"] and r["esaminati"] == 2
     finally:
-        _pulisci()
+        _pulisci(da_id)
 
 
 def test_storico_registrato():
     from database import get_db
     from services import loop_giornaliero as L
 
-    _pulisci()
+    da_id = _ultimo_id_storico()
+    _pulisci(da_id)
     try:
         with _finto_mondo():
             L.esegui(limite=3)
@@ -215,12 +236,9 @@ def test_storico_registrato():
         assert ultime and ultime[0]["stato"] == "completata"
         assert ultime[0]["importati"] == 1 and ultime[0]["scartati_punteggio"] == 1
         assert "Loopuno" in (ultime[0]["dettaglio"] or ""), "il dettaglio deve dire chi e perché"
-        db = get_db()
-        db.execute("DELETE FROM ocf_loop_run WHERE id = ?", (ultime[0]["id"],))
-        db.commit()
-        db.close()
+        assert ultime[0]["id"] > da_id, "la riga dev'essere nostra, non storico preesistente"
     finally:
-        _pulisci()
+        _pulisci(da_id)
 
 
 def test_scarta_chi_su_linkedin_non_e_a_roma():
@@ -231,7 +249,8 @@ def test_scarta_chi_su_linkedin_non_e_a_roma():
     """
     from services import loop_giornaliero as L
 
-    _pulisci()
+    da_id = _ultimo_id_storico()
+    _pulisci(da_id)
     try:
         with _finto_mondo(sedi={"Loopuno": "Milan, Lombardy, Italy",
                                 "Looptre": ""}) as mondo:
@@ -240,7 +259,7 @@ def test_scarta_chi_su_linkedin_non_e_a_roma():
         assert r["importati"] == 0, "nessuno dei due lavora a Roma"
         assert not mondo.analisi_fatte, "non si analizza chi è gia' fuori zona"
     finally:
-        _pulisci()
+        _pulisci(da_id)
 
 
 def test_riconoscimento_sede_romana():
@@ -262,7 +281,8 @@ def test_non_spende_in_ricerche_se_lai_e_giu():
     """
     from services import loop_giornaliero as L
 
-    _pulisci()
+    da_id = _ultimo_id_storico()
+    _pulisci(da_id)
     ricerche_fatte = []
     originale = L._raccogli_da_linkedin
     L._raccogli_da_linkedin = lambda q: (ricerche_fatte.append(1), ([], 1, 0))[1]
@@ -274,7 +294,47 @@ def test_non_spende_in_ricerche_se_lai_e_giu():
         assert not ricerche_fatte, "non deve partire nessuna ricerca a pagamento"
     finally:
         L._raccogli_da_linkedin = originale
-        _pulisci()
+        _pulisci(da_id)
+
+
+def test_errore_di_salvataggio_non_marca_il_candidato_come_gia_presente():
+    """
+    Un INSERT fallito non è un duplicato: se lo si tratta come tale, la persona
+    resta segnata come lavorata e non torna mai più, senza essere mai entrata.
+    """
+    from database import get_db
+    from services import loop_giornaliero as L
+
+    da_id = _ultimo_id_storico()
+    _pulisci(da_id)
+    originale = L._importa
+    L._importa = lambda p, li, a: (None, "errore")
+    try:
+        with _finto_mondo():
+            r = L.esegui(limite=3)
+        assert r["importati"] == 0
+        assert r["errori"] >= 1, r
+        db = get_db()
+        righe = db.execute(
+            "SELECT chiave FROM ocf_dossier WHERE chiave LIKE 'loop_k%'").fetchall()
+        db.close()
+        chiavi = {x["chiave"] for x in righe}
+        assert "loop_k1" not in chiavi, "chi non è stato salvato dev'essere ritentabile domani"
+    finally:
+        L._importa = originale
+        _pulisci(da_id)
+
+
+def test_sede_fuori_italia_o_regione_omonima_non_passa():
+    """Il difetto trovato dalla revisione: «roma» dentro «Emilia-Romagna»."""
+    from services.loop_giornaliero import lavora_a_roma
+    assert not lavora_a_roma("Bologna, Emilia-Romagna, Italy")
+    assert not lavora_a_roma("Forlì, Emilia-Romagna")
+    assert not lavora_a_roma("Bucharest, Romania")
+    assert not lavora_a_roma("San Marino")
+    assert not lavora_a_roma("Rome, New York, United States"), "Roma sbagliata"
+    assert lavora_a_roma("Greater Rome Metropolitan Area")
+    assert lavora_a_roma("Fiumicino, Lazio, Italy")
 
 
 if __name__ == "__main__":
