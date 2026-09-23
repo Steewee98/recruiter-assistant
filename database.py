@@ -500,6 +500,16 @@ def init_db():
         # Costo Apify effettivo del giro (differenza di consumo prima/dopo): la
         # convenienza della ricerca a gruppi va misurata, non solo prevista.
         "ALTER TABLE ocf_loop_run ADD COLUMN IF NOT EXISTS costo NUMERIC(10,4)",
+        # ── Interruttori dell'applicazione ────────────────────────────────
+        # Tabella chiave/valore per le cose che l'utente accende e spegne dalla
+        # pagina. Sta in database e non in una variabile d'ambiente perché deve
+        # poter cambiare con un click, senza un nuovo deploy, e perché il valore
+        # deve valere per tutti i processi (web e pianificatore).
+        """CREATE TABLE IF NOT EXISTS app_config (
+            chiave        TEXT PRIMARY KEY,
+            valore        TEXT,
+            aggiornato_il TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
         "CREATE INDEX IF NOT EXISTS idx_ocf_loop_data ON ocf_loop_run(eseguito_il DESC)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_rete       ON ocf_iscritti(rete)",
         "CREATE INDEX IF NOT EXISTS idx_ocf_comune     ON ocf_iscritti(comune)",

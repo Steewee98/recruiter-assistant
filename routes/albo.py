@@ -108,7 +108,9 @@ def _pianificatore():
 
         # Giro giornaliero: porta nuovi consulenti in «Da valutare».
         try:
-            if os.environ.get("LOOP_GIORNALIERO", "1") == "1" and not loop_giornaliero.gia_eseguito_oggi():
+            if (os.environ.get("LOOP_GIORNALIERO", "1") == "1"
+                    and loop_giornaliero.attivo()
+                    and not loop_giornaliero.gia_eseguito_oggi()):
                 log.info("Loop giornaliero: avvio")
                 esito = loop_giornaliero.esegui()
                 log.info("Loop giornaliero: %s — importati %s su %s esaminati (%s)",
@@ -156,6 +158,7 @@ def index():
     return render_template("albo.html", stats=stats, movimenti=ultimi_movimenti,
                            squadre=squadre, squadre_nuove=nuove,
                            loop_esecuzioni=loop_giornaliero.ultime_esecuzioni(5),
+                           loop_attivo=loop_giornaliero.attivo(),
                            loop_conf={"provincia": loop_giornaliero.PROVINCIA,
                                       "eta": loop_giornaliero.ETA_MINIMA - 1,
                                       "soglia": loop_giornaliero.PUNTEGGIO_MINIMO,
@@ -494,7 +497,8 @@ def loop_adesso():
     def _lavora():
         _loop_stato["in_corso"] = True
         try:
-            _loop_stato["esito"] = loop_giornaliero.esegui(ignora_budget=forza)
+            _loop_stato["esito"] = loop_giornaliero.esegui(ignora_budget=forza,
+                                                           forzato=True)
         except Exception as e:  # pragma: no cover
             log.error("Loop manuale fallito: %s", e, exc_info=True)
             _loop_stato["esito"] = {"ok": False, "nota": str(e)}
@@ -511,9 +515,26 @@ def loop_stato():
     return jsonify({
         "in_corso": _loop_stato["in_corso"],
         "esito": _loop_stato["esito"],
+        "attivo": loop_giornaliero.attivo(),
         "budget": loop_giornaliero.budget_apify(),
         "esecuzioni": loop_giornaliero.ultime_esecuzioni(5),
     })
+
+
+@albo_bp.route("/albo/loop/attivo", methods=["POST"])
+@login_required
+def loop_interruttore():
+    """
+    Accende o spegne il giro automatico.
+
+    Spento significa solo «non partire da solo»: il bottone «Esegui un giro
+    adesso» continua a funzionare, perché lì la spesa la sta chiedendo una
+    persona in quel momento.
+    """
+    voluto = bool((request.get_json() or {}).get("attivo"))
+    stato = loop_giornaliero.imposta_attivo(voluto)
+    log.info("Loop giornaliero %s da interfaccia", "acceso" if stato else "spento")
+    return jsonify({"ok": True, "attivo": stato})
 
 
 @albo_bp.route("/albo/movimenti")

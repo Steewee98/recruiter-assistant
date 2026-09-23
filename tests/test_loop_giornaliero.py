@@ -382,6 +382,89 @@ def test_un_giro_saltato_non_consuma_la_giornata():
         _pulisci(da_id)
 
 
+def test_interruttore_spento_ferma_il_giro_automatico():
+    """
+    Spento vuol dire spento: nessuna ricerca, nessuna analisi, e la giornata NON
+    viene consumata — così riaccendendolo il giro di oggi è ancora disponibile.
+    """
+    from database import get_db
+    from services import loop_giornaliero as L
+
+    def giri_che_contano():
+        """Giri di oggi che consumano la giornata, compresi quelli veri già in archivio."""
+        db = get_db()
+        try:
+            segnaposto = ",".join(["?"] * len(L.ESITI_CHE_CONTANO))
+            return db.execute(
+                f"""SELECT COUNT(*) AS n FROM ocf_loop_run
+                     WHERE DATE(eseguito_il) = CURRENT_DATE AND stato IN ({segnaposto})""",
+                list(L.ESITI_CHE_CONTANO)).fetchone()["n"]
+        finally:
+            db.close()
+
+    da_id = _ultimo_id_storico()
+    _pulisci(da_id)
+    prima = L.attivo()
+    ricerche_fatte = []
+    originale = L._raccogli_da_linkedin
+    L._raccogli_da_linkedin = lambda q: (ricerche_fatte.append(1), ([], 1, 0))[1]
+    try:
+        # Il conteggio parte da quello che c'è già: oggi può esserci un giro vero.
+        base = giri_che_contano()
+        L.imposta_attivo(False)
+        with _finto_mondo() as mondo:
+            r = L.esegui(limite=3)
+        assert not r["ok"]
+        assert "spento" in r["nota"].lower(), r["nota"]
+        assert not ricerche_fatte, "a interruttore spento non parte nessuna ricerca a pagamento"
+        assert not mondo.analisi_fatte, "né alcuna analisi AI"
+        assert giri_che_contano() == base, "un giro saltato perché spento non consuma la giornata"
+
+        db = get_db()
+        ultima = db.execute("SELECT stato FROM ocf_loop_run ORDER BY id DESC LIMIT 1").fetchone()
+        db.close()
+        assert ultima["stato"] == "saltata_spento", ultima
+    finally:
+        L._raccogli_da_linkedin = originale
+        L.imposta_attivo(prima)
+        _pulisci(da_id)
+
+
+def test_bottone_manuale_funziona_anche_a_interruttore_spento():
+    """
+    Spento significa «non partire da solo», non «sei disabilitato»: se una persona
+    chiede esplicitamente un giro, il giro si fa.
+    """
+    from services import loop_giornaliero as L
+
+    da_id = _ultimo_id_storico()
+    _pulisci(da_id)
+    prima = L.attivo()
+    try:
+        L.imposta_attivo(False)
+        with _finto_mondo():
+            r = L.esegui(limite=3, forzato=True)
+        assert r["ok"], r
+        assert r["importati"] == 1, r
+    finally:
+        L.imposta_attivo(prima)
+        _pulisci(da_id)
+
+
+def test_interruttore_si_ricorda_lo_stato():
+    """Acceso o spento deve sopravvivere al riavvio: sta in database, non in memoria."""
+    from services import loop_giornaliero as L
+
+    prima = L.attivo()
+    try:
+        L.imposta_attivo(True)
+        assert L.attivo() is True
+        L.imposta_attivo(False)
+        assert L.attivo() is False
+    finally:
+        L.imposta_attivo(prima)
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv

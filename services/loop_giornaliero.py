@@ -210,6 +210,52 @@ def budget_apify() -> dict:
 ESITI_CHE_CONTANO = ("completata", "nulla_da_fare")
 
 
+CHIAVE_ATTIVO = "loop_giornaliero_attivo"
+
+
+def attivo() -> bool:
+    """
+    L'automazione è accesa?
+
+    Sta in database e non in una variabile d'ambiente perché deve poter cambiare
+    con un click dalla pagina, subito, senza un nuovo deploy — e perché il web e
+    il pianificatore sono processi diversi che devono leggere lo stesso valore.
+
+    In caso di dubbio (tabella assente, database irraggiungibile) risponde SPENTO:
+    un'automazione che si paga a ricerca non deve ripartire da sola per un errore
+    di lettura.
+    """
+    db = get_db()
+    try:
+        r = db.execute("SELECT valore FROM app_config WHERE chiave = ?",
+                       (CHIAVE_ATTIVO,)).fetchone()
+    except Exception as e:
+        logger.warning("Stato del loop non leggibile, lo considero spento: %s", e)
+        return False
+    finally:
+        db.close()
+    if not r:
+        return False
+    return str(r["valore"]).strip().lower() in ("1", "true", "si", "sì", "on")
+
+
+def imposta_attivo(nuovo_stato: bool) -> bool:
+    """Accende o spegne l'automazione. Ritorna lo stato effettivamente salvato."""
+    db = get_db()
+    try:
+        db.execute("""
+            INSERT INTO app_config (chiave, valore, aggiornato_il)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore,
+                                               aggiornato_il = CURRENT_TIMESTAMP
+        """, (CHIAVE_ATTIVO, "1" if nuovo_stato else "0"))
+        db.commit()
+    finally:
+        db.close()
+    logger.info("Loop giornaliero %s", "acceso" if nuovo_stato else "spento")
+    return bool(nuovo_stato)
+
+
 def gia_eseguito_oggi() -> bool:
     db = get_db()
     try:
@@ -227,10 +273,15 @@ def gia_eseguito_oggi() -> bool:
         db.close()
 
 
-def esegui(limite: int = AL_GIORNO, ignora_budget: bool = False) -> dict:
+def esegui(limite: int = AL_GIORNO, ignora_budget: bool = False,
+           forzato: bool = False) -> dict:
     """
     Un giro completo. Non solleva: ogni errore finisce nel riepilogo e nella
     riga di storico.
+
+    `forzato=True` esegue anche a interruttore spento: è il caso del bottone
+    «Esegui un giro adesso», dove la spesa è stata chiesta da una persona in quel
+    momento. Il pianificatore automatico non lo usa mai.
     """
     from database import _get_raw_connection
     from services import albo_ocf, dossier_albo
@@ -252,7 +303,7 @@ def esegui(limite: int = AL_GIORNO, ignora_budget: bool = False) -> dict:
         return esito
 
     try:
-        return _esegui_protetto(esito, limite, ignora_budget)
+        return _esegui_protetto(esito, limite, ignora_budget, forzato)
     finally:
         try:
             cur.execute("SELECT pg_advisory_unlock(%s)", (LUCCHETTO_LOOP,))
@@ -262,8 +313,17 @@ def esegui(limite: int = AL_GIORNO, ignora_budget: bool = False) -> dict:
         conn.close()
 
 
-def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool) -> dict:
+def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool,
+                     forzato: bool = False) -> dict:
     from services import albo_ocf, dossier_albo
+
+    # 0-bis) Interruttore: è il primo controllo perché è l'unico gratis. Spento
+    #        vuol dire spento anche se budget e AI sarebbero disponibili.
+    if not forzato and not attivo():
+        esito["nota"] = ("Saltato: il giro automatico è spento. Si riaccende "
+                         "dall'interruttore nella pagina Albo.")
+        _registra_run(esito, stato="saltata_spento")
+        return esito
 
     # 1) Freno sul budget: prima di spendere, guarda quanto resta
     b = budget_apify()

@@ -237,19 +237,56 @@
 </div>
 
 <!-- ===== Loop giornaliero ===== -->
+<style>
+/* Interruttore del giro automatico */
+.interruttore { position: relative; display: inline-block; width: 42px; height: 24px; }
+.interruttore input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.interruttore-pista {
+    position: absolute; inset: 0; border-radius: 999px; background: #cbd5e1;
+    transition: background .18s ease; pointer-events: none;
+}
+.interruttore-pista::before {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25);
+    transition: transform .18s ease;
+}
+.interruttore input:checked + .interruttore-pista { background: #16a34a; }
+.interruttore input:checked + .interruttore-pista::before { transform: translateX(18px); }
+.interruttore input:disabled + .interruttore-pista { opacity: .6; }
+.interruttore input:focus-visible + .interruttore-pista { outline: 2px solid #2E7CF6; outline-offset: 2px; }
+</style>
 <div class="card" style="margin-top:1.5rem;">
-    <div class="card-header"><h3>Giro giornaliero automatico</h3></div>
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
+        <h3 style="margin:0;">Giro giornaliero automatico</h3>
+        <label style="display:flex;align-items:center;gap:0.55rem;cursor:pointer;user-select:none;">
+            <span id="loop-interruttore-etichetta"
+                  style="font-size:0.85rem;font-weight:600;color:{{ '#166534' if loop_attivo else 'var(--grigio-testo)' }};">
+                {{ 'Acceso' if loop_attivo else 'Spento' }}
+            </span>
+            <span class="interruttore">
+                <input type="checkbox" id="loop-interruttore" onchange="cambiaInterruttore(this)"
+                       {% if loop_attivo %}checked{% endif %}>
+                <span class="interruttore-pista"></span>
+            </span>
+        </label>
+    </div>
     <div class="card-body">
         <p style="font-size:0.85rem;color:var(--grigio-testo);margin:0 0 0.9rem;">
-            Ogni giorno prende <strong>{{ loop_conf.al_giorno }}</strong> consulenti dell'albo
-            in provincia di <strong>{{ loop_conf.provincia }}</strong> sopra i
-            <strong>{{ loop_conf.eta }} anni</strong>, partendo dai più propensi a cambiare;
-            ne cerca il profilo LinkedIn e scarta chi non ne ha uno attribuibile con certezza
-            o che <strong>su LinkedIn non risulti lavorare a Roma</strong> (l'albo dà il
-            domicilio, non l'ufficio: serve la conferma della sede). Analizza gli altri e porta
+            Ogni giorno cerca su LinkedIn consulenti con sede a Roma e tiene solo chi
+            risulta anche nell'albo OCF, in provincia di <strong>{{ loop_conf.provincia }}</strong>,
+            sopra i <strong>{{ loop_conf.eta }} anni</strong>, con un mandato e non già in
+            Fideuram. Scarta chi <strong>su LinkedIn non risulti lavorare a Roma</strong>
+            (l'albo dà il domicilio, non l'ufficio: serve la conferma della sede), analizza
+            i primi <strong>{{ loop_conf.al_giorno }}</strong> per propensione al cambio e porta
             in <strong>«Da valutare»</strong> chi prende almeno <strong>{{ loop_conf.soglia }}</strong>.
             Chi è già stato toccato non torna mai: anche gli scarti restano registrati.
         </p>
+        <div id="loop-spento-avviso"
+             style="font-size:0.85rem;margin-bottom:0.8rem;padding:0.6rem 0.8rem;border-radius:6px;
+                    background:#fef3c7;color:#92400e;{% if loop_attivo %}display:none;{% endif %}">
+            Il giro automatico è <strong>spento</strong>: non parte più da solo e non spende nulla.
+            Il bottone qui sotto continua a funzionare per un giro singolo, quando lo decidi tu.
+        </div>
         <div id="loop-budget" style="font-size:0.85rem;margin-bottom:0.8rem;"></div>
         <button class="btn btn-primary" id="btn-loop" onclick="eseguiLoop()">Esegui un giro adesso</button>
         <span id="loop-stato" style="font-size:0.85rem;margin-left:0.6rem;"></span>
@@ -770,6 +807,33 @@ async function mostraBudget() {
     } catch (e) { /* la pagina resta usabile anche senza */ }
 }
 mostraBudget();
+
+async function cambiaInterruttore(el) {
+    var voluto = el.checked;
+    el.disabled = true;
+    try {
+        var d = await (await fetch('/albo/loop/attivo', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({attivo: voluto})
+        })).json();
+        // Lo stato mostrato è quello CONFERMATO dal server, non quello cliccato:
+        // se il salvataggio non riesce l'interruttore deve tornare indietro da solo.
+        aggiornaInterruttore(!!d.attivo);
+    } catch (e) {
+        aggiornaInterruttore(!voluto);
+        alert('Non sono riuscito a salvare: riprova.');
+    } finally {
+        el.disabled = false;
+    }
+}
+
+function aggiornaInterruttore(acceso) {
+    document.getElementById('loop-interruttore').checked = acceso;
+    var et = document.getElementById('loop-interruttore-etichetta');
+    et.textContent = acceso ? 'Acceso' : 'Spento';
+    et.style.color = acceso ? '#166534' : 'var(--grigio-testo)';
+    document.getElementById('loop-spento-avviso').style.display = acceso ? 'none' : '';
+}
 
 async function eseguiLoop() {
     var btn = document.getElementById('btn-loop');
