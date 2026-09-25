@@ -164,9 +164,10 @@
                 </div>
                 <div style="font-size:0.8rem;">
                     {% if s.in_corso %}
-                    <span style="color:#b45309;font-weight:600;">&#9679; in corso</span> — rilevato in {{ s.finestra_giorni }} giorni
+                    <span style="color:#b45309;font-weight:600;">&#9679; in corso</span>
+                    {%- if s.finestra_giorni %} — rilevato in {{ s.finestra_giorni }} giorni{% endif %}
                     {% else %}
-                    <span style="color:var(--grigio-testo);">storico — finestra di {{ (s.finestra_giorni / 365)|round(1) }} anni</span>
+                    <span style="color:var(--grigio-testo);">storico{% if s.finestra_giorni %} — finestra di {{ (s.finestra_giorni / 365)|round(1) }} anni{% endif %}</span>
                     {% endif %}
                 </div>
             </div>
