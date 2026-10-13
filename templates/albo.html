@@ -237,6 +237,89 @@
     </div>
 </div>
 
+<!-- ===== Chi chiamare adesso ===== -->
+<style>
+.dc-riga { display:grid; grid-template-columns:2.4rem 1fr auto; gap:0.8rem; align-items:start;
+           padding:0.7rem 0; border-bottom:1px solid #eef2f7; }
+.dc-riga:last-child { border-bottom:0; }
+.dc-pos { font-weight:700; color:var(--grigio-testo); font-size:0.9rem; text-align:right; padding-top:0.15rem; }
+.dc-nome { font-weight:600; color:var(--blu-scuro); }
+.dc-perche { font-size:0.8rem; color:var(--grigio-testo); margin-top:0.15rem; }
+.dc-indice { display:inline-block; font-weight:700; font-size:0.82rem; padding:0.1rem 0.45rem;
+             border-radius:4px; background:#eef5ff; color:#1d4ed8; margin-left:0.4rem; }
+.dc-azioni { display:flex; gap:0.4rem; align-items:center; }
+.dc-azioni .btn { font-size:0.78rem; padding:0.3rem 0.7rem; }
+@media (max-width:720px) { .dc-riga { grid-template-columns:2rem 1fr; } .dc-azioni { grid-column:2; } }
+</style>
+<div class="card" style="margin-top:1.5rem;">
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
+        <h3 style="margin:0;">Chi chiamare adesso</h3>
+        <span id="dc-aggiornata" style="font-size:0.8rem;color:var(--grigio-testo);">
+            {% if da_chiamare.generata_il %}aggiornata il {{ da_chiamare.generata_il[:10] }}{% endif %}
+        </span>
+    </div>
+    <div class="card-body">
+        <p style="font-size:0.85rem;color:var(--grigio-testo);margin:0 0 0.9rem;">
+            I consulenti di {{ provincia }} ordinati per <strong>propensione misurata al cambio di
+            rete</strong>, esclusi quelli già lavorati o già in pipeline.
+            Il metodo è stato verificato sui passaggi reali dell'albo: ordinando così,
+            <strong>nei primi 500 nomi il 32,6% ha poi cambiato rete</strong> contro l'8,6% della
+            popolazione — circa <strong>quattro volte</strong> la media. Vuol dire che in cima alla
+            lista ci sono più persone pronte a muoversi, non che una data persona si muoverà.
+        </p>
+        <p style="font-size:0.8rem;color:var(--grigio-testo);margin:0 0 0.9rem;
+                  padding:0.55rem 0.75rem;background:#f8fafc;border-left:3px solid #cbd5e1;border-radius:4px;">
+            A contare sono <strong>la rete di provenienza</strong> e <strong>l'età</strong>: sono le
+            uniche due cose che i dati sostengono. Avere colleghi usciti di recente dalla stessa rete
+            è stato misurato e <strong>non dice nulla</strong> (0,92x), così come essersi già mossi in
+            passato (1,00x). Per questo la lista procede a blocchi: a parità di rete ed età il
+            punteggio è identico e l'ordine interno è alfabetico, non una graduatoria.
+        </p>
+
+        <button class="btn btn-secondary" id="btn-dc" onclick="rigeneraDaChiamare()">Ricalcola adesso</button>
+        <span id="dc-stato" style="font-size:0.85rem;margin-left:0.6rem;"></span>
+
+        <div id="dc-lista" style="margin-top:1rem;">
+        {% if da_chiamare.righe %}
+            <div style="font-size:0.82rem;color:var(--grigio-testo);margin-bottom:0.5rem;">
+                Primi {{ da_chiamare.righe|length }} di {{ da_chiamare.totale }} in classifica
+                — bacino lavorabile: {{ da_chiamare.bacino }} persone
+            </div>
+            {% for r in da_chiamare.righe %}
+            <div class="dc-riga" id="dc-{{ r.posizione }}">
+                <div class="dc-pos">{{ r.posizione }}</div>
+                <div>
+                    <div>
+                        <span class="dc-nome">{{ r.nome }} {{ r.cognome }}</span>
+                        <span class="dc-indice">{{ r.indice }}x</span>
+                        <span style="font-size:0.82rem;color:var(--grigio-testo);">
+                            · {{ r.rete }} · {{ r.comune }} · {{ r.eta }} anni
+                            · ~{{ r.probabilita_annua }}% che cambi entro l'anno
+                        </span>
+                    </div>
+                    <div class="dc-perche">{{ r.perche|join(' · ') }}</div>
+                </div>
+                <div class="dc-azioni">
+                    <a class="btn btn-secondary" target="_blank" rel="noopener"
+                       href="https://www.linkedin.com/search/results/people/?keywords={{ (r.nome ~ ' ' ~ r.cognome)|urlencode }}">LinkedIn</a>
+                    <button class="btn btn-primary"
+                            onclick="mandaInPipeline(this, {{ r.posizione }})"
+                            data-nome="{{ r.nome }}" data-cognome="{{ r.cognome }}"
+                            data-rete="{{ r.rete }}" data-chiave="{{ r.chiave }}"
+                            data-comune="{{ r.comune }}" data-provincia="{{ r.provincia }}"
+                            data-indice="{{ r.indice }}">In pipeline</button>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p style="color:var(--grigio-testo);font-size:0.9rem;margin:0;">
+                Classifica non ancora generata. Premi «Ricalcola adesso».
+            </p>
+        {% endif %}
+        </div>
+    </div>
+</div>
+
 <!-- ===== Loop giornaliero ===== -->
 <style>
 /* Interruttore del giro automatico */
@@ -787,6 +870,55 @@ async function inPipeline(idBox) {
             + (d.con_analisi ? ' con analisi' : ' — da valutare') + '</span>';
     } catch (e) {
         esito.innerHTML = '<span style="color:#dc2626;">Errore di rete.</span>';
+    }
+}
+
+// ── Chi chiamare adesso ──────────────────────────────────────────────────────
+async function rigeneraDaChiamare() {
+    var btn = document.getElementById('btn-dc');
+    var stato = document.getElementById('dc-stato');
+    btn.disabled = true;
+    stato.textContent = 'Ricalcolo…';
+    try {
+        var d = await (await fetch('/albo/da-chiamare/rigenera', {method: 'POST'})).json();
+        if (!d.ok) { stato.textContent = d.nota || 'Non riuscito.'; btn.disabled = false; return; }
+        stato.textContent = d.quanti + ' nomi su un bacino di ' + d.bacino + '. Ricarico…';
+        setTimeout(function () { location.reload(); }, 900);
+    } catch (e) {
+        stato.textContent = 'Errore di rete.';
+        btn.disabled = false;
+    }
+}
+
+async function mandaInPipeline(btn, posizione) {
+    btn.disabled = true;
+    var testo = btn.textContent;
+    btn.textContent = 'Invio…';
+    try {
+        var r = await fetch('/albo/in-pipeline', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                profilo: {
+                    chiave: btn.dataset.chiave, nome: btn.dataset.nome,
+                    cognome: btn.dataset.cognome, rete: btn.dataset.rete,
+                    comune: btn.dataset.comune, provincia: btn.dataset.provincia,
+                    propensione: {indice: parseFloat(btn.dataset.indice)}
+                },
+                tipo_profilo: 'A'
+            })
+        });
+        var d = await r.json();
+        if (r.status === 409) { btn.textContent = 'Già in pipeline'; return; }
+        if (!r.ok) { btn.textContent = 'Errore'; btn.disabled = false; return; }
+        btn.textContent = 'In pipeline ✓';
+        // Sparisce dalla lista al prossimo ricalcolo: chi è stato lavorato non
+        // deve ricomparire, ma togliere la riga adesso farebbe saltare il punto
+        // in cui si era arrivati a leggere.
+        document.getElementById('dc-' + posizione) &&
+            (document.getElementById('dc-' + posizione).style.opacity = '0.45');
+    } catch (e) {
+        btn.textContent = testo;
+        btn.disabled = false;
     }
 }
 

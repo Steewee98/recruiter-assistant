@@ -166,8 +166,12 @@ def stima_parametri() -> dict:
 
     # Esposti a una rete = chi c'è oggi + chi l'ha lasciata (che oggi risulta altrove)
     reti_tutte = set(attivi) | set(usciti)
-    tot_esposti = sum(attivi.get(r, 0) + usciti.get(r, 0) for r in reti_tutte) or 1
-    tot_mossi = sum(usciti.values())
+    # Le reti estinte (nessun iscritto attivo oggi) sono fuori anche dalla media
+    # di mercato: lasciarle dentro significherebbe misurare la mobilità dei
+    # consulenti italiani contando le fusioni come se fossero dimissioni.
+    reti_vive = {r for r in reti_tutte if attivi.get(r, 0) > 0}
+    tot_esposti = sum(attivi.get(r, 0) + usciti.get(r, 0) for r in reti_vive) or 1
+    tot_mossi = sum(usciti.get(r, 0) for r in reti_vive)
     base = tot_mossi / tot_esposti
 
     reti = {}
@@ -175,6 +179,19 @@ def stima_parametri() -> dict:
         esposti = attivi.get(r, 0) + usciti.get(r, 0)
         mossi = usciti.get(r, 0)
         if esposti < 10:
+            continue
+        # RETI ESTINTE: se oggi non ci lavora più nessuno, il 100% di "uscite"
+        # è una fusione o un cambio di ragione sociale, non mobilità. IW Private
+        # Investments risultava 91 usciti su 91, Chebanca! 70 su 70, Credit Suisse
+        # 56 su 56: in cima alla classifica delle reti "più mobili" c'erano tre
+        # reti che non esistono più. Il filtro `societario` non le prende perché
+        # lavora elenco per elenco e un assorbimento spalmato su più mesi non
+        # supera mai la soglia di massa.
+        # Escluderle non toglie nulla all'uso operativo — nessun consulente
+        # appartiene a una rete estinta, quindi nessuno di loro sarebbe stato
+        # ordinato con quel tasso — ma toglie dalla media di mercato un gonfiore
+        # che rendeva tutti gli altri artificialmente poco mobili.
+        if attivi.get(r, 0) == 0:
             continue
         # media pesata fra il tasso osservato e la media di mercato: una rete
         # piccola non deve schizzare in cima per due passaggi fortuiti

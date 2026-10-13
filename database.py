@@ -500,6 +500,28 @@ def init_db():
         # Costo Apify effettivo del giro (differenza di consumo prima/dopo): la
         # convenienza della ricerca a gruppi va misurata, non solo prevista.
         "ALTER TABLE ocf_loop_run ADD COLUMN IF NOT EXISTS costo NUMERIC(10,4)",
+        # ── Classifica «chi chiamare adesso» ──────────────────────────────
+        # Viene rigenerata una volta a settimana, dopo la sincronizzazione
+        # dell'albo, e resta ferma fino alla successiva: chi telefona lavora la
+        # lista per giorni, e un ordine che cambia sotto le mani rende
+        # impossibile sapere a che punto si era arrivati.
+        """CREATE TABLE IF NOT EXISTS ocf_da_chiamare (
+            chiave            TEXT PRIMARY KEY,
+            posizione         INTEGER NOT NULL,
+            nome              TEXT,
+            cognome           TEXT,
+            rete              TEXT,
+            comune            TEXT,
+            provincia         TEXT,
+            eta               INTEGER,
+            indice            NUMERIC(6,2),
+            probabilita_annua NUMERIC(6,2),
+            perche            TEXT,
+            bacino            INTEGER,
+            generata_il       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_da_chiamare_pos ON ocf_da_chiamare(posizione)",
+
         # ── Interruttori dell'applicazione ────────────────────────────────
         # Tabella chiave/valore per le cose che l'utente accende e spegne dalla
         # pagina. Sta in database e non in una variabile d'ambiente perché deve

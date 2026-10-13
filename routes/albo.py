@@ -24,7 +24,7 @@ from flask import Blueprint, jsonify, render_template, request
 from database import get_db
 from dedup import is_duplicate
 from routes.auth import login_required
-from services import albo_ocf, loop_giornaliero
+from services import albo_ocf, chi_chiamare, loop_giornaliero
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +106,16 @@ def _pianificatore():
         except Exception as e:  # pragma: no cover — il thread non deve mai morire
             log.warning("Pianificatore albo: %s", e)
 
+        # Classifica «chi chiamare»: si rigenera dopo l'aggiornamento dell'albo,
+        # perché è lì che cambiano le reti delle persone — ed è la rete a
+        # spostare il punteggio.
+        try:
+            if chi_chiamare.serve_rigenerare(GIORNI_CADENZA):
+                log.info("Classifica «chi chiamare»: rigenero")
+                chi_chiamare.genera()
+        except Exception as e:  # pragma: no cover
+            log.warning("Classifica «chi chiamare»: %s", e)
+
         # Giro giornaliero: porta nuovi consulenti in «Da valutare».
         try:
             if (os.environ.get("LOOP_GIORNALIERO", "1") == "1"
@@ -157,6 +167,7 @@ def index():
         solo_provincia=albo_ocf.PROVINCIA_OPERATIVA, solo_non_viste=True)
     return render_template("albo.html", stats=stats, movimenti=ultimi_movimenti,
                            squadre=squadre, squadre_nuove=nuove,
+                           da_chiamare=chi_chiamare.leggi(50),
                            loop_esecuzioni=loop_giornaliero.ultime_esecuzioni(5),
                            loop_attivo=loop_giornaliero.attivo(),
                            loop_conf={"provincia": loop_giornaliero.PROVINCIA,
@@ -535,6 +546,23 @@ def loop_interruttore():
     stato = loop_giornaliero.imposta_attivo(voluto)
     log.info("Loop giornaliero %s da interfaccia", "acceso" if stato else "spento")
     return jsonify({"ok": True, "attivo": stato})
+
+
+@albo_bp.route("/albo/da-chiamare/rigenera", methods=["POST"])
+@login_required
+def da_chiamare_rigenera():
+    """
+    Ricalcola subito la classifica. Non costa nulla: sono solo query sull'albo
+    già scaricato, nessuna ricerca a pagamento e nessuna chiamata all'AI.
+    """
+    esito = chi_chiamare.genera()
+    return jsonify(esito), (200 if esito.get("ok") else 500)
+
+
+@albo_bp.route("/albo/da-chiamare")
+@login_required
+def da_chiamare_lista():
+    return jsonify(chi_chiamare.leggi(int(request.args.get("limite", 50))))
 
 
 @albo_bp.route("/albo/movimenti")
