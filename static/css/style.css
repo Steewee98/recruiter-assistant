@@ -1929,3 +1929,141 @@ body {
     .page-title { font-size: 1.15rem; }
     .btn { font-size: 0.8rem; padding: 0.45rem 0.85rem; }
 }
+
+/* =============================================
+   ALBO OCF — pagina operativa
+   Una pagina sola che risponde a tre domande, in quest'ordine:
+   chi chiamo adesso · cosa si sta muovendo · chi cerco.
+   Gli stili stanno qui e non inline nel template: la pagina
+   ripeteva le stesse quindici dichiarazioni in ogni blocco.
+   ============================================= */
+
+/* ── Barra della fonte: stato dei dati e comandi ─────────────────── */
+.albo-fonte {
+    display: flex; flex-wrap: wrap; gap: 1.25rem;
+    align-items: center; justify-content: space-between;
+    padding: 0.9rem 1.2rem; margin-bottom: 1.4rem;
+    background: var(--bianco); border: 1px solid var(--grigio-bordo);
+    border-radius: var(--radius);
+}
+.albo-metriche { display: flex; gap: 2.2rem; flex-wrap: wrap; }
+.albo-metrica .valore {
+    font-size: 1.45rem; font-weight: 700; color: var(--blu-scuro);
+    line-height: 1.1; font-variant-numeric: tabular-nums;
+}
+.albo-metrica .etichetta {
+    font-size: 0.78rem; color: var(--grigio-testo); margin-top: 0.1rem;
+}
+.albo-fonte-azioni { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+/* ── Navigazione interna: la pagina è lunga sei blocchi ──────────── */
+.albo-nav {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; gap: 0.3rem; flex-wrap: wrap;
+    padding: 0.55rem 0; margin-bottom: 1.2rem;
+    background: var(--grigio-bg); border-bottom: 1px solid var(--grigio-bordo);
+}
+.albo-nav a {
+    font-size: 0.82rem; font-weight: 600; color: var(--grigio-testo);
+    text-decoration: none; padding: 0.35rem 0.7rem; border-radius: 6px;
+    transition: background .15s ease, color .15s ease;
+}
+.albo-nav a:hover { background: var(--azzurro-light); color: var(--azzurro); }
+
+/* ── Sezioni ─────────────────────────────────────────────────────── */
+.albo-sez { margin-bottom: 1.6rem; scroll-margin-top: 3.5rem; }
+.albo-sez-testa {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem;
+}
+.albo-sez-testa h2 {
+    font-size: 1.12rem; font-weight: 700; color: var(--blu-scuro); margin: 0;
+}
+.albo-sez-testa .meta { font-size: 0.8rem; color: var(--grigio-testo); }
+/* La sezione primaria è una sola: quella da cui si lavora. */
+.albo-sez--primaria .albo-sez-testa h2 { font-size: 1.3rem; }
+.albo-sez--primaria > .card { border-top: 3px solid var(--azzurro); }
+
+.albo-nota {
+    font-size: 0.84rem; color: var(--grigio-testo);
+    line-height: 1.55; margin: 0 0 0.9rem; max-width: 78ch;
+}
+.albo-nota--attenzione {
+    padding: 0.6rem 0.8rem; border-left: 3px solid var(--grigio-bordo);
+    background: #f8fafc; border-radius: 0 6px 6px 0;
+}
+
+/* ── «Chi chiamare adesso» ───────────────────────────────────────── */
+.dc-riga {
+    display: grid; grid-template-columns: 2.2rem 1fr auto;
+    gap: 0.9rem; align-items: center;
+    padding: 0.6rem 0; border-bottom: 1px solid #eef2f7;
+}
+.dc-riga:last-of-type { border-bottom: 0; }
+.dc-riga.fatto { opacity: .45; }
+.dc-pos {
+    font-size: 0.85rem; font-weight: 700; color: var(--grigio-testo);
+    text-align: right; font-variant-numeric: tabular-nums;
+}
+.dc-nome { font-weight: 600; color: var(--blu-scuro); }
+.dc-dati { font-size: 0.82rem; color: var(--grigio-testo); }
+.dc-perche { font-size: 0.79rem; color: var(--grigio-testo); margin-top: 0.15rem; }
+.dc-indice {
+    display: inline-block; font-weight: 700; font-size: 0.8rem;
+    padding: 0.08rem 0.42rem; border-radius: 5px;
+    background: var(--azzurro-light); color: var(--azzurro);
+    font-variant-numeric: tabular-nums;
+}
+.dc-azioni { display: flex; gap: 0.4rem; align-items: center; }
+.dc-azioni .btn { font-size: 0.78rem; padding: 0.3rem 0.7rem; }
+
+/* ── Squadre ─────────────────────────────────────────────────────── */
+.albo-squadra {
+    padding: 0.85rem 0; border-bottom: 1px solid #eef2f7;
+}
+.albo-squadra:last-of-type { border-bottom: 0; }
+.albo-squadra-testa {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 1rem; flex-wrap: wrap;
+}
+.albo-squadra .persone {
+    font-weight: 700; color: var(--blu-scuro); font-size: 1.02rem;
+    font-variant-numeric: tabular-nums;
+}
+.albo-squadra .tragitto { color: var(--grigio-testo); font-size: 0.88rem; }
+.albo-squadra .nomi { font-size: 0.83rem; color: var(--grigio-testo); margin: 0.3rem 0 0.5rem; }
+.stato-corso { color: var(--arancio); font-weight: 600; font-size: 0.8rem; }
+.stato-storico { color: var(--grigio-testo); font-size: 0.8rem; }
+
+/* ── Interruttore del giro automatico ────────────────────────────── */
+.interruttore { position: relative; display: inline-block; width: 42px; height: 24px; }
+.interruttore input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.interruttore-pista {
+    position: absolute; inset: 0; border-radius: 999px; background: #cbd5e1;
+    transition: background .18s ease; pointer-events: none;
+}
+.interruttore-pista::before {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25);
+    transition: transform .18s ease;
+}
+.interruttore input:checked + .interruttore-pista { background: var(--verde); }
+.interruttore input:checked + .interruttore-pista::before { transform: translateX(18px); }
+.interruttore input:disabled + .interruttore-pista { opacity: .6; }
+.interruttore input:focus-visible + .interruttore-pista { outline: 2px solid var(--azzurro); outline-offset: 2px; }
+
+.albo-avviso {
+    font-size: 0.84rem; padding: 0.6rem 0.8rem; border-radius: 6px;
+    background: #FEF3C7; color: #92400E; margin-bottom: 0.8rem;
+}
+
+/* ── Ricerca: filtri a sinistra, risultati a destra ──────────────── */
+.albo-ricerca { display: grid; grid-template-columns: 320px 1fr; gap: 1.2rem; align-items: start; }
+
+@media (max-width: 900px) {
+    .albo-ricerca { grid-template-columns: 1fr; }
+    .dc-riga { grid-template-columns: 1.8rem 1fr; }
+    .dc-azioni { grid-column: 2; margin-top: 0.3rem; }
+    .albo-fonte { flex-direction: column; align-items: flex-start; }
+    .albo-nav { overflow-x: auto; flex-wrap: nowrap; }
+}

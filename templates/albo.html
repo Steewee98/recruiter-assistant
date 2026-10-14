@@ -5,343 +5,148 @@
 <div class="page-header">
     <h1 class="page-title">Albo OCF</h1>
     <p class="page-subtitle">
-        L'elenco ufficiale dei consulenti finanziari abilitati, filtrabile per rete e città.
-        Nessuna ricerca da pagare: è la popolazione completa, non un campione.
+        L'elenco ufficiale dei consulenti abilitati: la popolazione completa, non un campione.
+        Qui si decide chi chiamare, si vede cosa si sta muovendo e si cerca per rete e città.
     </p>
 </div>
 
 <!-- ===== Stato della fonte ===== -->
-<div class="card" style="margin-bottom:1.2rem;">
-    <div class="card-body" style="display:flex;flex-wrap:wrap;gap:1.5rem;align-items:center;justify-content:space-between;">
-        <div style="display:flex;gap:2rem;flex-wrap:wrap;">
-            <div>
-                <div style="font-size:1.6rem;font-weight:700;color:var(--blu-scuro);">
-                    {{ '{:,}'.format(stats.totale).replace(',', '.') }}
-                </div>
-                <div style="font-size:0.82rem;color:var(--grigio-testo);">consulenti in archivio</div>
+<div class="albo-fonte">
+    <div class="albo-metriche">
+        <div class="albo-metrica">
+            <div class="valore">{{ '{:,}'.format(stats.totale).replace(',', '.') }}</div>
+            <div class="etichetta">consulenti in archivio</div>
+        </div>
+        <div class="albo-metrica">
+            <div class="valore">{{ stats.cambi_rete_totali }}</div>
+            <div class="etichetta">passaggi di rete rilevati</div>
+        </div>
+        <div class="albo-metrica">
+            {% if stats.ultima_sync %}
+            <div class="valore" style="font-size:1rem;padding-top:0.35rem;">
+                elenco del {{ stats.ultima_sync.data_elenco or '—' }}
             </div>
-            <div>
-                <div style="font-size:1.6rem;font-weight:700;color:var(--blu-scuro);">{{ stats.cambi_rete_totali }}</div>
-                <div style="font-size:0.82rem;color:var(--grigio-testo);">passaggi di rete rilevati</div>
-            </div>
-            <div>
-                {% if stats.ultima_sync %}
-                <div style="font-size:0.95rem;font-weight:600;color:var(--blu-scuro);">
-                    elenco del {{ stats.ultima_sync.data_elenco or '—' }}
-                </div>
-                <div style="font-size:0.82rem;color:var(--grigio-testo);">
-                    aggiornato il {{ (stats.ultima_sync.eseguito_il or '')[:10] }}
-                    {% if stats.ultima_sync.esito != 'ok' %}
-                        · <span style="color:#dc2626;">ultima sincronizzazione fallita</span>
-                    {% endif %}
-                </div>
-                {% else %}
-                <div style="font-size:0.95rem;font-weight:600;color:#b45309;">Mai sincronizzato</div>
-                <div style="font-size:0.82rem;color:var(--grigio-testo);">scarica l'elenco per iniziare</div>
+            <div class="etichetta">
+                aggiornato il {{ (stats.ultima_sync.eseguito_il or '')[:10] }}
+                {% if stats.ultima_sync.esito != 'ok' %}
+                    · <span style="color:var(--rosso);">ultima sincronizzazione fallita</span>
                 {% endif %}
             </div>
+            {% else %}
+            <div class="valore" style="font-size:1rem;padding-top:0.35rem;color:var(--arancio);">Mai sincronizzato</div>
+            <div class="etichetta">scarica l'elenco per iniziare</div>
+            {% endif %}
         </div>
-        <div style="text-align:right;">
-            <button class="btn btn-primary" id="btn-sync" onclick="sincronizza()">
-                &#8635; Aggiorna dall'albo
-            </button>
-            <button class="btn btn-secondary" id="btn-storico" onclick="ricostruisci()">
-                &#128337; Ricostruisci lo storico
-            </button>
-            <div id="sync-stato" style="font-size:0.8rem;color:var(--grigio-testo);margin-top:0.4rem;"></div>
-        </div>
+    </div>
+    <div class="albo-fonte-azioni">
+        <button class="btn btn-secondary" id="btn-storico" onclick="ricostruisci()">Ricostruisci lo storico</button>
+        <button class="btn btn-primary" id="btn-sync" onclick="sincronizza()">Aggiorna dall'albo</button>
+        <div id="sync-stato" style="font-size:0.8rem;color:var(--grigio-testo);width:100%;text-align:right;"></div>
     </div>
 </div>
 
-<div style="display:grid;grid-template-columns:320px 1fr;gap:1.2rem;align-items:start;">
+<nav class="albo-nav">
+    <a href="#chiamare">Chi chiamare</a>
+    <a href="#automatico">Giro automatico</a>
+    <a href="#squadre">Squadre in movimento</a>
+    <a href="#cerca">Cerca nell'albo</a>
+    <a href="#passaggi">Passaggi rilevati</a>
+</nav>
 
-    <!-- ===== Filtri ===== -->
-    <div class="card">
-        <div class="card-header"><h3>Chi cerchi</h3></div>
-        <div class="card-body">
-            <label class="form-label">Rete</label>
-            <select class="form-select" id="f-rete">
-                <option value="">Tutte tranne Fideuram</option>
-                {% for r in stats.reti %}
-                <option value="{{ r.rete }}">{{ r.rete }} ({{ r.n }})</option>
-                {% endfor %}
-            </select>
-
-            <label class="form-label" style="margin-top:0.8rem;">Provincia (sigla)</label>
-            <input class="form-input" id="f-provincia" placeholder="Es. RM" maxlength="2" autocomplete="off">
-            <div style="font-size:0.76rem;color:var(--grigio-testo);margin-top:0.25rem;">
-                È il filtro da usare per «chi lavora su Roma».
-            </div>
-
-            <label class="form-label" style="margin-top:0.8rem;">Comune (facoltativo)</label>
-            <input class="form-input" id="f-comune" placeholder="Es. Roma" autocomplete="off">
-            <div style="font-size:0.76rem;color:#b45309;margin-top:0.25rem;">
-                Attenzione: l'albo pubblica il <strong>domicilio eletto</strong> (di norma la
-                residenza), non l'ufficio. Su LinkedIn troverai spesso una città diversa.
-                Restringere al comune perde circa metà della provincia.
-            </div>
-
-            <div style="display:flex;gap:0.5rem;margin-top:0.8rem;">
-                <div style="flex:1;">
-                    <label class="form-label">Età da</label>
-                    <input class="form-input" id="f-eta-min" type="number" min="20" max="80" placeholder="30">
-                </div>
-                <div style="flex:1;">
-                    <label class="form-label">a</label>
-                    <input class="form-input" id="f-eta-max" type="number" min="20" max="80" placeholder="55">
-                </div>
-            </div>
-
-            <label style="display:flex;gap:0.45rem;align-items:flex-start;margin-top:0.9rem;font-size:0.82rem;color:var(--grigio-testo);">
-                <input type="checkbox" id="f-lavorati" style="margin-top:0.15rem;">
-                <span>Mostra anche chi ho già lavorato (dossier fatto o già in pipeline)</span>
-            </label>
-
-            <button class="btn btn-primary" style="width:100%;margin-top:0.8rem;justify-content:center;"
-                    onclick="cercaAlbo(0)">Cerca nell'albo</button>
-            <div id="albo-errore" class="hidden" style="color:#dc2626;font-size:0.85rem;margin-top:0.6rem;"></div>
-        </div>
-    </div>
-
-    <!-- ===== Risultati ===== -->
-    <div>
-        <div id="albo-stato" style="font-size:0.88rem;color:var(--grigio-testo);margin-bottom:0.7rem;">
-            Imposta i filtri e cerca. I risultati arrivano dal database locale: nessuna attesa, nessun costo.
-        </div>
-        <div id="albo-azioni" class="hidden" style="margin-bottom:0.8rem;">
-            <button class="btn btn-secondary" onclick="selezionaTutti()">Seleziona tutti i nuovi</button>
-            <button class="btn btn-primary" onclick="importaSelezionati()">Importa in pipeline</button>
-            <button class="btn btn-primary" onclick="dossierPrimi(10)">&#128203; Dossier dei primi 10</button>
-            <div style="font-size:0.78rem;color:var(--grigio-testo);margin-top:0.35rem;">
-                Il dossier cerca il profilo LinkedIn di ciascuno: una ricerca a pagamento per persona,
-                una ventina di secondi l'una. Con la selezione attiva analizza i selezionati.
-            </div>
-        </div>
-        <div id="dossier-area"></div>
-        <div id="albo-risultati"></div>
-        <div id="albo-paginazione" style="margin-top:1rem;text-align:center;"></div>
-    </div>
-</div>
-
-<!-- ===== Squadre in movimento ===== -->
 {% if squadre_nuove %}
-<div class="card" style="margin-top:1.5rem;border-left:4px solid #b45309;">
-    <div class="card-body">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
-            <div>
-                <strong style="color:#b45309;">&#9679; {{ squadre_nuove|length }} nuova/e squadra/e rilevata/e</strong>
-                <div style="font-size:0.85rem;color:var(--grigio-testo);margin-top:0.2rem;">
-                    {% for s in squadre_nuove %}{{ s.persone }} da {{ s.rete_precedente }}{% if not loop.last %} · {% endif %}{% endfor %}
-                    — dall'ultimo aggiornamento dell'albo.
-                </div>
+<div class="card" style="margin-bottom:1.4rem;border-left:4px solid var(--arancio);">
+    <div class="card-body" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <div>
+            <strong style="color:var(--arancio);">{{ squadre_nuove|length }} nuova/e squadra/e rilevata/e</strong>
+            <div style="font-size:0.85rem;color:var(--grigio-testo);margin-top:0.2rem;">
+                {% for s in squadre_nuove %}{{ s.persone }} da {{ s.rete_precedente }}{% if not loop.last %} · {% endif %}{% endfor %}
+                dall'ultimo aggiornamento dell'albo.
             </div>
-            <button class="btn btn-secondary" onclick="archiviaSegnalazione(this)">Ho visto</button>
         </div>
+        <button class="btn btn-secondary" onclick="archiviaSegnalazione(this)">Ho visto</button>
     </div>
 </div>
 {% endif %}
 
-<div class="card" style="margin-top:1.5rem;">
-    <div class="card-header"><h3>Squadre entrate in Fideuram &mdash; {{ provincia }}</h3></div>
-    <div class="card-body">
-        <p style="font-size:0.85rem;color:var(--grigio-testo);margin:0 0 1rem;">
-            Gruppi passati <strong>in Fideuram</strong> sulla piazza di <strong>{{ provincia }}</strong>.
-            Non è casualità: negli elenchi storici i passaggi a grappolo sono fino a
-            <strong>12 volte</strong> più frequenti di quanto sarebbero se ognuno scegliesse da solo
-            — è la firma del gruppo che segue il proprio responsabile.
-            Quello che conta qui non è il gruppo (quelle persone sono già nostre) ma
-            <strong>chi si è lasciato dietro</strong> nella banca di partenza: stesso giro, stessa
-            zona, e un motivo concreto per chiamarli.
-        </p>
-        {% if squadre %}
-        {% for s in squadre %}
-        <div style="border:1px solid var(--bordo,#e2e8f0);border-radius:12px;padding:0.9rem 1.1rem;margin-bottom:0.7rem;">
-            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;">
-                <div>
-                    <span style="font-weight:700;color:var(--blu-scuro);font-size:1.05rem;">{{ s.persone }} persone</span>
-                    <span style="color:var(--grigio-testo);"> · {{ s.rete_precedente }} &rarr; <strong>{{ s.rete_nuova }}</strong></span>
-                    <span style="color:var(--grigio-testo);"> · {{ s.provincia }}</span>
-                </div>
-                <div style="font-size:0.8rem;">
-                    {% if s.in_corso %}
-                    <span style="color:#b45309;font-weight:600;">&#9679; in corso</span>
-                    {%- if s.finestra_giorni %} — rilevato in {{ s.finestra_giorni }} giorni{% endif %}
-                    {% else %}
-                    <span style="color:var(--grigio-testo);">storico{% if s.finestra_giorni %} — finestra di {{ (s.finestra_giorni / 365)|round(1) }} anni{% endif %}</span>
-                    {% endif %}
-                </div>
-            </div>
-            <div style="font-size:0.85rem;color:var(--grigio-testo);margin:0.4rem 0 0.6rem;">{{ s.nomi }}</div>
-            {% if s.colleghi_rimasti %}
-            <button class="btn btn-secondary" style="font-size:0.82rem;padding:0.35rem 0.8rem;"
-                    onclick='mostraColleghi(this, {{ s.rete_precedente|tojson }}, {{ s.provincia|tojson }})'>
-                Chi è rimasto in {{ s.rete_precedente }} ({{ s.provincia }}): {{ s.colleghi_rimasti }} &rarr;
-            </button>
-            <div class="colleghi" style="margin-top:0.7rem;"></div>
-            {% else %}
-            <div style="font-size:0.82rem;color:var(--grigio-testo);">Nessun collega rimasto in provincia: la squadra se n'è andata tutta.</div>
-            {% endif %}
-        </div>
-        {% endfor %}
-        <p style="font-size:0.8rem;color:var(--grigio-testo);margin:0.8rem 0 0;">
-            I gruppi marcati «storico» vengono da un confronto su una finestra lunga e possono
-            mettere insieme partenze non simultanee. Quelli marcati «in corso» arrivano dal
-            confronto settimanale: sono squadre che si stanno muovendo adesso.
-        </p>
-        <p style="font-size:0.8rem;color:#b45309;margin:0.4rem 0 0;">
-            Attenzione a come si legge: i dati mostrano che una squadra si muove <strong>insieme</strong>,
-            nella stessa finestra — non a scaglioni. Che i colleghi rimasti seguano più tardi
-            <strong>non risulta dai numeri</strong> (misure troppo poche e discordi). Quindi questa
-            lista vale come occasione di contatto con un motivo concreto e va lavorata subito, non
-            come previsione.
-        </p>
-        {% else %}
-        <p style="color:var(--grigio-testo);font-size:0.9rem;margin:0;">
-            Nessun gruppo entrato in Fideuram a {{ provincia }}. Se lo storico non è mai stato
-            ricostruito, premi «Ricostruisci lo storico»; altrimenti significa che nell'ultimo
-            periodo non ci sono stati ingressi di gruppo su questa piazza.
-        </p>
-        {% endif %}
-    </div>
-</div>
-
-<!-- ===== Radar movimenti ===== -->
-<div class="card" style="margin-top:1.5rem;">
-    <div class="card-header">
-        <h3>Passaggi di rete rilevati</h3>
-    </div>
-    <div class="card-body">
-        {% if movimenti %}
-        <table class="table">
-            <thead><tr><th>Consulente</th><th>Città</th><th>Da</th><th>A</th><th>Rilevato</th></tr></thead>
-            <tbody>
-            {% for m in movimenti %}
-                <tr>
-                    <td><strong>{{ m.nome }} {{ m.cognome }}</strong></td>
-                    <td>{{ m.comune }}{% if m.provincia %} ({{ m.provincia }}){% endif %}</td>
-                    <td>{{ m.rete_precedente or '—' }}</td>
-                    <td>{{ m.rete_nuova or '—' }}</td>
-                    <td>{{ (m.rilevato_il or '')[:10] }}</td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <p style="color:var(--grigio-testo);font-size:0.9rem;margin:0;">
-            Ancora nessun movimento. I passaggi di rete si ottengono confrontando due elenchi
-            successivi: dopo la <strong>seconda</strong> sincronizzazione (l'albo viene aggiornato
-            da OCF di continuo) qui compare chi ha cambiato bandiera, con nome, città e rete di
-            partenza.
-        </p>
-        {% endif %}
-    </div>
-</div>
-
-<!-- ===== Chi chiamare adesso ===== -->
-<style>
-.dc-riga { display:grid; grid-template-columns:2.4rem 1fr auto; gap:0.8rem; align-items:start;
-           padding:0.7rem 0; border-bottom:1px solid #eef2f7; }
-.dc-riga:last-child { border-bottom:0; }
-.dc-pos { font-weight:700; color:var(--grigio-testo); font-size:0.9rem; text-align:right; padding-top:0.15rem; }
-.dc-nome { font-weight:600; color:var(--blu-scuro); }
-.dc-perche { font-size:0.8rem; color:var(--grigio-testo); margin-top:0.15rem; }
-.dc-indice { display:inline-block; font-weight:700; font-size:0.82rem; padding:0.1rem 0.45rem;
-             border-radius:4px; background:#eef5ff; color:#1d4ed8; margin-left:0.4rem; }
-.dc-azioni { display:flex; gap:0.4rem; align-items:center; }
-.dc-azioni .btn { font-size:0.78rem; padding:0.3rem 0.7rem; }
-@media (max-width:720px) { .dc-riga { grid-template-columns:2rem 1fr; } .dc-azioni { grid-column:2; } }
-</style>
-<div class="card" style="margin-top:1.5rem;">
-    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
-        <h3 style="margin:0;">Chi chiamare adesso</h3>
-        <span id="dc-aggiornata" style="font-size:0.8rem;color:var(--grigio-testo);">
+<!-- ===== 1. Chi chiamare adesso ===== -->
+<section class="albo-sez albo-sez--primaria" id="chiamare">
+    <div class="albo-sez-testa">
+        <h2>Chi chiamare adesso</h2>
+        <span class="meta" id="dc-aggiornata">
             {% if da_chiamare.generata_il %}aggiornata il {{ da_chiamare.generata_il[:10] }}{% endif %}
         </span>
     </div>
-    <div class="card-body">
-        <p style="font-size:0.85rem;color:var(--grigio-testo);margin:0 0 0.9rem;">
-            I consulenti di {{ provincia }} ordinati per <strong>propensione misurata al cambio di
-            rete</strong>, esclusi quelli già lavorati o già in pipeline.
-            Il metodo è stato verificato sui passaggi reali dell'albo: ordinando così,
-            <strong>nei primi 500 nomi il 32,6% ha poi cambiato rete</strong> contro l'8,6% della
-            popolazione — circa <strong>quattro volte</strong> la media. Vuol dire che in cima alla
-            lista ci sono più persone pronte a muoversi, non che una data persona si muoverà.
-        </p>
-        <p style="font-size:0.8rem;color:var(--grigio-testo);margin:0 0 0.9rem;
-                  padding:0.55rem 0.75rem;background:#f8fafc;border-left:3px solid #cbd5e1;border-radius:4px;">
-            A contare sono <strong>la rete di provenienza</strong> e <strong>l'età</strong>: sono le
-            uniche due cose che i dati sostengono. Avere colleghi usciti di recente dalla stessa rete
-            è stato misurato e <strong>non dice nulla</strong> (0,92x), così come essersi già mossi in
-            passato (1,00x). Per questo la lista procede a blocchi: a parità di rete ed età il
-            punteggio è identico e l'ordine interno è alfabetico, non una graduatoria.
-        </p>
-
-        <button class="btn btn-secondary" id="btn-dc" onclick="rigeneraDaChiamare()">Ricalcola adesso</button>
-        <span id="dc-stato" style="font-size:0.85rem;margin-left:0.6rem;"></span>
-
-        <div id="dc-lista" style="margin-top:1rem;">
-        {% if da_chiamare.righe %}
-            <div style="font-size:0.82rem;color:var(--grigio-testo);margin-bottom:0.5rem;">
-                Primi {{ da_chiamare.righe|length }} di {{ da_chiamare.totale }} in classifica
-                — bacino lavorabile: {{ da_chiamare.bacino }} persone
-            </div>
-            {% for r in da_chiamare.righe %}
-            <div class="dc-riga" id="dc-{{ r.posizione }}">
-                <div class="dc-pos">{{ r.posizione }}</div>
-                <div>
-                    <div>
-                        <span class="dc-nome">{{ r.nome }} {{ r.cognome }}</span>
-                        <span class="dc-indice">{{ r.indice }}x</span>
-                        <span style="font-size:0.82rem;color:var(--grigio-testo);">
-                            · {{ r.rete }} · {{ r.comune }} · {{ r.eta }} anni
-                            · ~{{ r.probabilita_annua }}% che cambi entro l'anno
-                        </span>
-                    </div>
-                    <div class="dc-perche">{{ r.perche|join(' · ') }}</div>
-                </div>
-                <div class="dc-azioni">
-                    <a class="btn btn-secondary" target="_blank" rel="noopener"
-                       href="https://www.linkedin.com/search/results/people/?keywords={{ (r.nome ~ ' ' ~ r.cognome)|urlencode }}">LinkedIn</a>
-                    <button class="btn btn-primary"
-                            onclick="mandaInPipeline(this, {{ r.posizione }})"
-                            data-nome="{{ r.nome }}" data-cognome="{{ r.cognome }}"
-                            data-rete="{{ r.rete }}" data-chiave="{{ r.chiave }}"
-                            data-comune="{{ r.comune }}" data-provincia="{{ r.provincia }}"
-                            data-indice="{{ r.indice }}">In pipeline</button>
-                </div>
-            </div>
-            {% endfor %}
-        {% else %}
-            <p style="color:var(--grigio-testo);font-size:0.9rem;margin:0;">
-                Classifica non ancora generata. Premi «Ricalcola adesso».
+    <div class="card">
+        <div class="card-body">
+            <p class="albo-nota">
+                I consulenti di {{ provincia }} ordinati per <strong>propensione misurata al cambio di
+                rete</strong>, esclusi quelli già lavorati o già in pipeline. Il metodo è stato verificato
+                sui passaggi reali dell'albo: ordinando così, <strong>nei primi 500 nomi il 32,6% ha poi
+                cambiato rete</strong> contro l'8,6% della popolazione, circa <strong>quattro volte</strong>
+                la media. Vuol dire che in cima ci sono più persone pronte a muoversi, non che una data
+                persona si muoverà.
             </p>
-        {% endif %}
+            <p class="albo-nota albo-nota--attenzione">
+                A contare sono <strong>la rete di provenienza</strong> e <strong>l'età</strong>: sono le
+                uniche due cose che i dati sostengono. Avere colleghi usciti di recente dalla stessa rete
+                è stato misurato e <strong>non dice nulla</strong> (0,92x), così come essersi già mossi in
+                passato (1,00x). Per questo la lista procede a blocchi: a parità di rete ed età il
+                punteggio è identico e l'ordine interno è alfabetico, non una graduatoria.
+            </p>
+
+            <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;margin-bottom:0.9rem;">
+                <button class="btn btn-secondary" id="btn-dc" onclick="rigeneraDaChiamare()">Ricalcola adesso</button>
+                <span id="dc-stato" style="font-size:0.85rem;color:var(--grigio-testo);"></span>
+                {% if da_chiamare.righe %}
+                <span class="meta" style="margin-left:auto;font-size:0.8rem;color:var(--grigio-testo);">
+                    primi {{ da_chiamare.righe|length }} di {{ da_chiamare.totale }}
+                    · bacino lavorabile {{ da_chiamare.bacino }} persone
+                </span>
+                {% endif %}
+            </div>
+
+            <div id="dc-lista">
+            {% if da_chiamare.righe %}
+                {% for r in da_chiamare.righe %}
+                <div class="dc-riga" id="dc-{{ r.posizione }}">
+                    <div class="dc-pos">{{ r.posizione }}</div>
+                    <div>
+                        <div>
+                            <span class="dc-nome">{{ r.nome }} {{ r.cognome }}</span>
+                            <span class="dc-indice">{{ r.indice }}x</span>
+                            <span class="dc-dati">
+                                · {{ r.rete }} · {{ r.comune }} · {{ r.eta }} anni
+                                · ~{{ r.probabilita_annua }}% che cambi entro l'anno
+                            </span>
+                        </div>
+                        <div class="dc-perche">{{ r.perche|join(' · ') }}</div>
+                    </div>
+                    <div class="dc-azioni">
+                        <a class="btn btn-secondary" target="_blank" rel="noopener"
+                           href="https://www.linkedin.com/search/results/people/?keywords={{ (r.nome ~ ' ' ~ r.cognome)|urlencode }}">LinkedIn</a>
+                        <button class="btn btn-primary"
+                                onclick="mandaInPipeline(this, {{ r.posizione }})"
+                                data-nome="{{ r.nome }}" data-cognome="{{ r.cognome }}"
+                                data-rete="{{ r.rete }}" data-chiave="{{ r.chiave }}"
+                                data-comune="{{ r.comune }}" data-provincia="{{ r.provincia }}"
+                                data-indice="{{ r.indice }}">In pipeline</button>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p class="albo-nota" style="margin:0;">
+                    Classifica non ancora generata. Premi «Ricalcola adesso».
+                </p>
+            {% endif %}
+            </div>
         </div>
     </div>
-</div>
+</section>
 
-<!-- ===== Loop giornaliero ===== -->
-<style>
-/* Interruttore del giro automatico */
-.interruttore { position: relative; display: inline-block; width: 42px; height: 24px; }
-.interruttore input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
-.interruttore-pista {
-    position: absolute; inset: 0; border-radius: 999px; background: #cbd5e1;
-    transition: background .18s ease; pointer-events: none;
-}
-.interruttore-pista::before {
-    content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
-    border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25);
-    transition: transform .18s ease;
-}
-.interruttore input:checked + .interruttore-pista { background: #16a34a; }
-.interruttore input:checked + .interruttore-pista::before { transform: translateX(18px); }
-.interruttore input:disabled + .interruttore-pista { opacity: .6; }
-.interruttore input:focus-visible + .interruttore-pista { outline: 2px solid #2E7CF6; outline-offset: 2px; }
-</style>
-<div class="card" style="margin-top:1.5rem;">
-    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
-        <h3 style="margin:0;">Giro giornaliero automatico</h3>
+<!-- ===== 2. Giro giornaliero automatico ===== -->
+<section class="albo-sez" id="automatico">
+    <div class="albo-sez-testa">
+        <h2>Giro giornaliero automatico</h2>
         <label style="display:flex;align-items:center;gap:0.55rem;cursor:pointer;user-select:none;">
             <span id="loop-interruttore-etichetta"
                   style="font-size:0.85rem;font-weight:600;color:{{ '#166534' if loop_attivo else 'var(--grigio-testo)' }};">
@@ -354,58 +159,231 @@
             </span>
         </label>
     </div>
-    <div class="card-body">
-        <p style="font-size:0.85rem;color:var(--grigio-testo);margin:0 0 0.9rem;">
-            Ogni giorno cerca su LinkedIn consulenti con sede a Roma e tiene solo chi
-            risulta anche nell'albo OCF, in provincia di <strong>{{ loop_conf.provincia }}</strong>,
-            sopra i <strong>{{ loop_conf.eta }} anni</strong>, con un mandato e non già in
-            Fideuram. Scarta chi <strong>su LinkedIn non risulti lavorare a Roma</strong>
-            (l'albo dà il domicilio, non l'ufficio: serve la conferma della sede), analizza
-            i primi <strong>{{ loop_conf.al_giorno }}</strong> per propensione al cambio e porta
-            in <strong>«Da valutare»</strong> chi prende almeno <strong>{{ loop_conf.soglia }}</strong>.
-            Chi è già stato toccato non torna mai: anche gli scarti restano registrati.
-        </p>
-        <div id="loop-spento-avviso"
-             style="font-size:0.85rem;margin-bottom:0.8rem;padding:0.6rem 0.8rem;border-radius:6px;
-                    background:#fef3c7;color:#92400e;{% if loop_attivo %}display:none;{% endif %}">
-            Il giro automatico è <strong>spento</strong>: non parte più da solo e non spende nulla.
-            Il bottone qui sotto continua a funzionare per un giro singolo, quando lo decidi tu.
-        </div>
-        <div id="loop-budget" style="font-size:0.85rem;margin-bottom:0.8rem;"></div>
-        <button class="btn btn-primary" id="btn-loop" onclick="eseguiLoop()">Esegui un giro adesso</button>
-        <span id="loop-stato" style="font-size:0.85rem;margin-left:0.6rem;"></span>
+    <div class="card">
+        <div class="card-body">
+            <p class="albo-nota">
+                Ogni giorno cerca su LinkedIn consulenti con sede a Roma e tiene solo chi risulta anche
+                nell'albo, in provincia di <strong>{{ loop_conf.provincia }}</strong>, sopra i
+                <strong>{{ loop_conf.eta }} anni</strong>, con un mandato e non già in Fideuram. Scarta chi
+                <strong>su LinkedIn non risulti lavorare a Roma</strong> (l'albo dà il domicilio, non
+                l'ufficio), analizza i primi <strong>{{ loop_conf.al_giorno }}</strong> per propensione e
+                porta in <strong>«Da valutare»</strong> chi prende almeno
+                <strong>{{ loop_conf.soglia }}</strong>. Chi è già stato toccato non torna mai.
+            </p>
+            <div id="loop-spento-avviso" class="albo-avviso"
+                 {% if loop_attivo %}style="display:none;"{% endif %}>
+                Il giro automatico è <strong>spento</strong>: non parte più da solo e non spende nulla.
+                Il bottone qui sotto continua a funzionare per un giro singolo, quando lo decidi tu.
+            </div>
+            <div id="loop-budget" style="font-size:0.85rem;margin-bottom:0.8rem;"></div>
+            <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
+                <button class="btn btn-primary" id="btn-loop" onclick="eseguiLoop()">Esegui un giro adesso</button>
+                <span id="loop-stato" style="font-size:0.85rem;"></span>
+            </div>
 
-        <div id="loop-storico" style="margin-top:1rem;">
-        {% if loop_esecuzioni %}
-        <table class="table">
-            <thead><tr><th>Quando</th><th>Esito</th><th>Esaminati</th><th>Con LinkedIn</th>
-                       <th>Fuori Roma</th><th>Importati</th><th>Scartati</th>
-                       <th>Costo</th><th>Nota</th></tr></thead>
-            <tbody>
-            {% for e in loop_esecuzioni %}
-                <tr>
-                    <td>{{ (e.eseguito_il or '')[:16] }}</td>
-                    <td>{{ e.stato }}</td>
-                    <td>{{ e.esaminati }}</td>
-                    <td>{{ e.con_linkedin }}</td>
-                    <td>{{ e.fuori_zona or 0 }}</td>
-                    <td><strong>{{ e.importati }}</strong></td>
-                    <td>{{ e.scartati_punteggio + e.senza_linkedin }}</td>
-                    <td>{% if e.costo %}{{ '%.2f'|format(e.costo|float) }}$
-                        <span style="font-size:0.78rem;color:var(--grigio-testo);">
-                        ({{ '%.3f'|format((e.costo|float) / (e.esaminati or 1)) }}$ a testa)</span>
-                        {% else %}—{% endif %}</td>
-                    <td style="font-size:0.8rem;color:var(--grigio-testo);">{{ e.nota }}</td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <p style="color:var(--grigio-testo);font-size:0.9rem;margin:0;">Nessun giro ancora eseguito.</p>
-        {% endif %}
+            <div id="loop-storico" style="margin-top:1rem;">
+            {% if loop_esecuzioni %}
+            <table class="table">
+                <thead><tr><th>Quando</th><th>Esito</th><th>Esaminati</th><th>Con LinkedIn</th>
+                           <th>Fuori Roma</th><th>Importati</th><th>Scartati</th>
+                           <th>Costo</th><th>Nota</th></tr></thead>
+                <tbody>
+                {% for e in loop_esecuzioni %}
+                    <tr>
+                        <td>{{ (e.eseguito_il or '')[:16] }}</td>
+                        <td>{{ e.stato }}</td>
+                        <td>{{ e.esaminati }}</td>
+                        <td>{{ e.con_linkedin }}</td>
+                        <td>{{ e.fuori_zona or 0 }}</td>
+                        <td><strong>{{ e.importati }}</strong></td>
+                        <td>{{ e.scartati_punteggio + e.senza_linkedin }}</td>
+                        <td>{% if e.costo %}{{ '%.2f'|format(e.costo|float) }}$
+                            <span style="font-size:0.78rem;color:var(--grigio-testo);">
+                            ({{ '%.3f'|format((e.costo|float) / (e.esaminati or 1)) }}$ a testa)</span>
+                            {% else %}&mdash;{% endif %}</td>
+                        <td style="font-size:0.8rem;color:var(--grigio-testo);">{{ e.nota }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="albo-nota" style="margin:0;">Nessun giro ancora eseguito.</p>
+            {% endif %}
+            </div>
         </div>
     </div>
-</div>
+</section>
+
+<!-- ===== 3. Squadre in movimento ===== -->
+<section class="albo-sez" id="squadre">
+    <div class="albo-sez-testa">
+        <h2>Squadre entrate in Fideuram &mdash; {{ provincia }}</h2>
+        <span class="meta">{{ squadre|length }} gruppi</span>
+    </div>
+    <div class="card">
+        <div class="card-body">
+            <p class="albo-nota">
+                Gruppi passati <strong>in Fideuram</strong> sulla piazza di <strong>{{ provincia }}</strong>.
+                Non è casualità: negli elenchi storici i passaggi a grappolo sono fino a
+                <strong>12 volte</strong> più frequenti di quanto sarebbero se ognuno scegliesse da solo.
+                Quello che conta non è il gruppo (quelle persone sono già nostre) ma
+                <strong>chi si è lasciato dietro</strong>: stesso giro, stessa zona, e un motivo concreto
+                per chiamarli.
+            </p>
+            {% if squadre %}
+            {% for s in squadre %}
+            <div class="albo-squadra">
+                <div class="albo-squadra-testa">
+                    <div>
+                        <span class="persone">{{ s.persone }} persone</span>
+                        <span class="tragitto">· {{ s.rete_precedente }} &rarr; <strong>{{ s.rete_nuova }}</strong> · {{ s.provincia }}</span>
+                    </div>
+                    <div>
+                        {% if s.in_corso %}
+                        <span class="stato-corso">in corso</span>
+                        {%- if s.finestra_giorni %}<span class="stato-storico"> · rilevato in {{ s.finestra_giorni }} giorni</span>{% endif %}
+                        {% else %}
+                        <span class="stato-storico">storico{% if s.finestra_giorni %} · finestra di {{ (s.finestra_giorni / 365)|round(1) }} anni{% endif %}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="nomi">{{ s.nomi }}</div>
+                {% if s.colleghi_rimasti %}
+                <button class="btn btn-secondary" style="font-size:0.82rem;padding:0.35rem 0.8rem;"
+                        onclick='mostraColleghi(this, {{ s.rete_precedente|tojson }}, {{ s.provincia|tojson }})'>
+                    Chi è rimasto in {{ s.rete_precedente }} ({{ s.provincia }}): {{ s.colleghi_rimasti }} &rarr;
+                </button>
+                <div class="colleghi" style="margin-top:0.7rem;"></div>
+                {% else %}
+                <div class="dc-dati">Nessun collega rimasto in provincia: la squadra se n'è andata tutta.</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+            <p class="albo-nota albo-nota--attenzione" style="margin:1rem 0 0;">
+                I gruppi marcati «storico» vengono da un confronto su una finestra lunga e possono mettere
+                insieme partenze non simultanee; quelli «in corso» arrivano dal confronto settimanale.
+                Attenzione a come si legge: i dati mostrano che una squadra si muove <strong>insieme</strong>,
+                nella stessa finestra. Che i colleghi rimasti seguano più tardi
+                <strong>non risulta dai numeri</strong>. Questa lista vale come occasione di contatto con un
+                motivo concreto, da lavorare subito, non come previsione.
+            </p>
+            {% else %}
+            <p class="albo-nota" style="margin:0;">
+                Nessun gruppo entrato in Fideuram a {{ provincia }}. Se lo storico non è mai stato
+                ricostruito, premi «Ricostruisci lo storico»; altrimenti nell'ultimo periodo non ci sono
+                stati ingressi di gruppo su questa piazza.
+            </p>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+<!-- ===== 4. Cerca nell'albo ===== -->
+<section class="albo-sez" id="cerca">
+    <div class="albo-sez-testa">
+        <h2>Cerca nell'albo</h2>
+        <span class="meta">istantanea e gratuita: interroga l'archivio locale</span>
+    </div>
+    <div class="albo-ricerca">
+        <div class="card">
+            <div class="card-header"><h3>Chi cerchi</h3></div>
+            <div class="card-body">
+                <label class="form-label">Rete</label>
+                <select class="form-select" id="f-rete">
+                    <option value="">Tutte tranne Fideuram</option>
+                    {% for r in stats.reti %}
+                    <option value="{{ r.rete }}">{{ r.rete }} ({{ r.n }})</option>
+                    {% endfor %}
+                </select>
+
+                <label class="form-label" style="margin-top:0.8rem;">Provincia (sigla)</label>
+                <input class="form-input" id="f-provincia" placeholder="Es. RM" maxlength="2" autocomplete="off">
+                <div style="font-size:0.76rem;color:var(--grigio-testo);margin-top:0.25rem;">
+                    È il filtro da usare per «chi lavora su Roma».
+                </div>
+
+                <label class="form-label" style="margin-top:0.8rem;">Comune (facoltativo)</label>
+                <input class="form-input" id="f-comune" placeholder="Es. Roma" autocomplete="off">
+                <div style="font-size:0.76rem;color:var(--arancio);margin-top:0.25rem;">
+                    L'albo pubblica il <strong>domicilio eletto</strong> (di norma la residenza), non
+                    l'ufficio: restringere al comune perde circa metà della provincia.
+                </div>
+
+                <div style="display:flex;gap:0.5rem;margin-top:0.8rem;">
+                    <div style="flex:1;">
+                        <label class="form-label">Età da</label>
+                        <input class="form-input" id="f-eta-min" type="number" min="20" max="80" placeholder="30">
+                    </div>
+                    <div style="flex:1;">
+                        <label class="form-label">a</label>
+                        <input class="form-input" id="f-eta-max" type="number" min="20" max="80" placeholder="55">
+                    </div>
+                </div>
+
+                <label style="display:flex;gap:0.45rem;align-items:flex-start;margin-top:0.9rem;font-size:0.82rem;color:var(--grigio-testo);">
+                    <input type="checkbox" id="f-lavorati" style="margin-top:0.15rem;">
+                    <span>Mostra anche chi ho già lavorato (dossier fatto o già in pipeline)</span>
+                </label>
+
+                <button class="btn btn-primary" style="width:100%;margin-top:0.8rem;justify-content:center;"
+                        onclick="cercaAlbo(0)">Cerca nell'albo</button>
+                <div id="albo-errore" class="hidden" style="color:var(--rosso);font-size:0.85rem;margin-top:0.6rem;"></div>
+            </div>
+        </div>
+
+        <div>
+            <div id="albo-stato" style="font-size:0.88rem;color:var(--grigio-testo);margin-bottom:0.7rem;">
+                Imposta i filtri e cerca. I risultati arrivano dal database locale: nessuna attesa, nessun costo.
+            </div>
+            <div id="albo-azioni" class="hidden" style="margin-bottom:0.8rem;">
+                <button class="btn btn-secondary" onclick="selezionaTutti()">Seleziona tutti i nuovi</button>
+                <button class="btn btn-primary" onclick="importaSelezionati()">Importa in pipeline</button>
+                <button class="btn btn-primary" onclick="dossierPrimi(10)">Dossier dei primi 10</button>
+                <div style="font-size:0.78rem;color:var(--grigio-testo);margin-top:0.35rem;">
+                    Il dossier cerca il profilo LinkedIn di ciascuno: una ricerca a pagamento per persona,
+                    una ventina di secondi l'una. Con la selezione attiva analizza i selezionati.
+                </div>
+            </div>
+            <div id="dossier-area"></div>
+            <div id="albo-risultati"></div>
+            <div id="albo-paginazione" style="margin-top:1rem;text-align:center;"></div>
+        </div>
+    </div>
+</section>
+
+<!-- ===== 5. Passaggi di rete rilevati ===== -->
+<section class="albo-sez" id="passaggi">
+    <div class="albo-sez-testa">
+        <h2>Passaggi di rete rilevati</h2>
+        <span class="meta">gli ultimi {{ movimenti|length }}</span>
+    </div>
+    <div class="card">
+        <div class="card-body">
+            {% if movimenti %}
+            <table class="table">
+                <thead><tr><th>Consulente</th><th>Città</th><th>Da</th><th>A</th><th>Rilevato</th></tr></thead>
+                <tbody>
+                {% for m in movimenti %}
+                    <tr>
+                        <td><strong>{{ m.nome }} {{ m.cognome }}</strong></td>
+                        <td>{{ m.comune }}{% if m.provincia %} ({{ m.provincia }}){% endif %}</td>
+                        <td>{{ m.rete_precedente or '—' }}</td>
+                        <td>{{ m.rete_nuova or '—' }}</td>
+                        <td>{{ (m.rilevato_il or '')[:10] }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="albo-nota" style="margin:0;">
+                Ancora nessun movimento. I passaggi di rete si ottengono confrontando due elenchi
+                successivi: dopo la <strong>seconda</strong> sincronizzazione qui compare chi ha cambiato
+                bandiera, con nome, città e rete di partenza.
+            </p>
+            {% endif %}
+        </div>
+    </div>
+</section>
 
 <script>
 // ── Sincronizzazione elenco ufficiale ────────────────────────────────────────
