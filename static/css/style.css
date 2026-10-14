@@ -2067,3 +2067,139 @@ body {
     .albo-fonte { flex-direction: column; align-items: flex-start; }
     .albo-nav { overflow-x: auto; flex-wrap: nowrap; }
 }
+
+/* =============================================
+   ALBO OCF v2 — pannelli ampi
+   Set di componenti con prefisso .p- usato SOLO dalla pagina Albo.
+   Vive accanto al design esistente invece di sostituirlo: se funziona si
+   estende alle altre pagine, se non funziona si torna indietro cancellando
+   un blocco solo. I nomi non collidono con .card / .table dell'app.
+   ============================================= */
+
+.pagina-albo { --p-bordo: #E9EEF6; --p-superficie: #FFFFFF; --p-fondo: #F6F8FC;
+    --p-ombra: 0 1px 2px rgba(16,24,40,.04), 0 12px 32px -16px rgba(16,24,40,.18);
+    --p-ombra-alta: 0 1px 2px rgba(16,24,40,.05), 0 18px 40px -18px rgba(16,24,40,.26);
+    --p-raggio: 18px; }
+
+/* ── Intestazione ────────────────────────────────────────────────────── */
+.p-hero { display: flex; justify-content: space-between; align-items: flex-end;
+    gap: 2rem; flex-wrap: wrap; margin-bottom: 1.6rem; }
+.p-hero h1 { font-size: 2rem; font-weight: 750; letter-spacing: -0.02em;
+    color: var(--blu-scuro); margin: 0 0 0.35rem; line-height: 1.1; }
+.p-hero p { font-size: 0.95rem; color: var(--grigio-testo); margin: 0; max-width: 60ch; }
+.p-hero-azioni { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+
+/* ── Tessere numeriche ───────────────────────────────────────────────── */
+.p-kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.9rem; margin-bottom: 1.6rem; }
+.p-tessera { background: var(--p-superficie); border: 1px solid var(--p-bordo);
+    border-radius: var(--p-raggio); padding: 1.25rem 1.4rem; box-shadow: var(--p-ombra); }
+.p-tessera .numero { font-size: 2.1rem; font-weight: 750; letter-spacing: -0.03em;
+    color: var(--blu-scuro); line-height: 1; font-variant-numeric: tabular-nums; }
+.p-tessera .didascalia { font-size: 0.85rem; color: var(--grigio-testo); margin-top: 0.45rem; }
+.p-tessera--accento { background: linear-gradient(180deg, #F5F9FF 0%, #FFFFFF 60%);
+    border-color: #D6E6FF; }
+.p-tessera--accento .numero { color: var(--azzurro); }
+
+/* ── Pannello ────────────────────────────────────────────────────────── */
+.p-pannello { background: var(--p-superficie); border: 1px solid var(--p-bordo);
+    border-radius: var(--p-raggio); box-shadow: var(--p-ombra); margin-bottom: 1.6rem;
+    scroll-margin-top: 4.5rem; overflow: hidden; }
+.p-pannello-testa { display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 1.5rem; flex-wrap: wrap; padding: 1.5rem 1.7rem 0; }
+.p-pannello-testa h2 { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.015em;
+    color: var(--blu-scuro); margin: 0; }
+.p-pannello-testa .sottotitolo { font-size: 0.87rem; color: var(--grigio-testo); margin-top: 0.3rem; }
+.p-pannello-corpo { padding: 1.3rem 1.7rem 1.6rem; }
+.p-pannello--rilievo { border-color: #D6E6FF; box-shadow: var(--p-ombra-alta); }
+.p-pannello--rilievo .p-pannello-testa { background: linear-gradient(180deg, #F5F9FF, #FFFFFF);
+    padding-bottom: 1.2rem; }
+
+/* ── Testi di servizio ───────────────────────────────────────────────── */
+.p-testo { font-size: 0.89rem; line-height: 1.6; color: #5A6B8C; max-width: 80ch; margin: 0 0 1rem; }
+.p-testo strong { color: var(--blu-scuro); }
+.p-riquadro { font-size: 0.85rem; line-height: 1.6; color: #5A6B8C; background: #F7F9FD;
+    border-radius: 12px; padding: 0.9rem 1.1rem; margin: 0 0 1.2rem; }
+.p-riquadro--ambra { background: #FFF8EC; color: #8A5A10; }
+.p-riquadro--ambra strong { color: #7A4F0C; }
+
+/* ── Pillole ─────────────────────────────────────────────────────────── */
+.p-pillola { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.75rem;
+    font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 999px;
+    background: #F1F5FB; color: #5A6B8C; white-space: nowrap; }
+.p-pillola--forte { background: #E8F1FF; color: #1D5BD6; }
+.p-pillola--ambra { background: #FFF2DC; color: #8A5A10; }
+.p-pillola--verde { background: #E8F8EF; color: #1B7A46; }
+
+/* ── Riga persona ────────────────────────────────────────────────────── */
+.p-persona { display: grid; grid-template-columns: 2rem 44px 1fr auto auto;
+    gap: 0.95rem; align-items: center; padding: 0.85rem 0.9rem; border-radius: 14px;
+    transition: background .15s ease; }
+.p-persona + .p-persona { margin-top: 0.15rem; }
+.p-persona:hover { background: #F7F9FD; }
+.p-persona.fatto { opacity: .45; }
+.p-rango { font-size: 0.85rem; font-weight: 700; color: #9AA8C2; text-align: right;
+    font-variant-numeric: tabular-nums; }
+.p-iniziali { width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center;
+    font-size: 0.92rem; font-weight: 700; letter-spacing: 0.01em; color: #42526E; background: #EEF2F8; }
+.p-iniziali.t1 { background: #E8F1FF; color: #1D5BD6; }
+.p-iniziali.t2 { background: #EAF6F0; color: #1B7A46; }
+.p-iniziali.t3 { background: #FDF1E7; color: #9A5B20; }
+.p-iniziali.t4 { background: #F0EEFA; color: #574B9E; }
+.p-persona .nome { font-size: 1rem; font-weight: 650; color: var(--blu-scuro); line-height: 1.3; }
+.p-persona .meta { font-size: 0.83rem; color: var(--grigio-testo); margin-top: 0.15rem;
+    display: flex; gap: 0.45rem; align-items: center; flex-wrap: wrap; }
+.p-persona .motivo { font-size: 0.79rem; color: #8694AE; margin-top: 0.25rem; }
+.p-punteggio { text-align: right; }
+.p-punteggio .valore { font-size: 1.35rem; font-weight: 750; color: var(--azzurro);
+    line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.p-punteggio .unita { font-size: 0.74rem; color: var(--grigio-testo); margin-top: 0.2rem; }
+.p-azioni { display: flex; gap: 0.4rem; }
+.p-azioni .btn { font-size: 0.79rem; padding: 0.38rem 0.8rem; border-radius: 9px; }
+
+/* ── Interruttore ────────────────────────────────────────────────────── */
+.p-interruttore { display: flex; align-items: center; gap: 0.6rem; cursor: pointer;
+    user-select: none; background: #F7F9FD; border: 1px solid var(--p-bordo);
+    border-radius: 999px; padding: 0.4rem 0.75rem 0.4rem 0.95rem; }
+.p-interruttore span.etichetta { font-size: 0.84rem; font-weight: 650; }
+
+/* ── Tabella ─────────────────────────────────────────────────────────── */
+.p-tabella { width: 100%; border-collapse: collapse; font-size: 0.87rem; }
+.p-tabella th { text-align: left; font-size: 0.76rem; font-weight: 650; color: #8694AE;
+    padding: 0 0.7rem 0.6rem; border-bottom: 1px solid var(--p-bordo); white-space: nowrap; }
+.p-tabella td { padding: 0.65rem 0.7rem; border-bottom: 1px solid #F2F5FA; color: #42526E; }
+.p-tabella tbody tr:last-child td { border-bottom: 0; }
+.p-tabella tbody tr:hover td { background: #F8FAFD; }
+.p-tabella td strong { color: var(--blu-scuro); }
+.p-numerico { font-variant-numeric: tabular-nums; }
+
+/* ── Squadra ─────────────────────────────────────────────────────────── */
+.p-squadra { border: 1px solid var(--p-bordo); border-radius: 14px; padding: 1rem 1.2rem;
+    margin-bottom: 0.7rem; transition: box-shadow .15s ease, border-color .15s ease; }
+.p-squadra:hover { border-color: #D6E6FF; box-shadow: var(--p-ombra); }
+.p-squadra .titolo { font-size: 1.05rem; font-weight: 700; color: var(--blu-scuro); }
+.p-squadra .nomi { font-size: 0.84rem; color: var(--grigio-testo); margin: 0.45rem 0 0.7rem; }
+
+/* ── Stato vuoto ─────────────────────────────────────────────────────── */
+.p-vuoto { text-align: center; padding: 2.2rem 1rem; color: var(--grigio-testo);
+    font-size: 0.9rem; background: #FAFBFE; border-radius: 14px; }
+
+/* ── Ancore ──────────────────────────────────────────────────────────── */
+.p-ancore { position: sticky; top: 0; z-index: 20; display: flex; gap: 0.25rem;
+    flex-wrap: wrap; padding: 0.6rem 0; margin-bottom: 1.4rem;
+    background: var(--grigio-bg); }
+.p-ancore a { font-size: 0.83rem; font-weight: 650; color: var(--grigio-testo);
+    text-decoration: none; padding: 0.4rem 0.85rem; border-radius: 999px;
+    transition: background .15s ease, color .15s ease; }
+.p-ancore a:hover { background: #E8F1FF; color: var(--azzurro); }
+
+/* ── Ricerca ─────────────────────────────────────────────────────────── */
+.p-ricerca { display: grid; grid-template-columns: 300px 1fr; gap: 1.4rem; align-items: start; }
+
+@media (max-width: 980px) {
+    .p-ricerca { grid-template-columns: 1fr; }
+    .p-persona { grid-template-columns: 1.6rem 40px 1fr auto; row-gap: 0.5rem; }
+    .p-azioni { grid-column: 3 / -1; justify-content: flex-end; }
+    .p-hero h1 { font-size: 1.6rem; }
+    .p-pannello-testa, .p-pannello-corpo { padding-left: 1.1rem; padding-right: 1.1rem; }
+}
