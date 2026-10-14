@@ -445,12 +445,32 @@ function seguiSync() {
             } else {
                 stato.textContent = e.errore || 'Sincronizzazione non riuscita.';
             }
-        } catch (err) { clearInterval(t); btn.disabled = false; }
+        } catch (err) {
+            // Il polling è morto (rete caduta, sessione scaduta): i due bottoni
+            // vanno riabilitati entrambi e l'utente deve saperlo, altrimenti la
+            // pagina resta a dire «in corso» per sempre su un lavoro che non
+            // stiamo più seguendo.
+            clearInterval(t);
+            btn.disabled = false;
+            document.getElementById('btn-storico').disabled = false;
+            stato.textContent = 'Non riesco più a seguire l’operazione: ricarica la pagina per '
+                              + 'vedere com’è andata.';
+        }
     }, 3000);
 }
 
 // ── Ricerca ──────────────────────────────────────────────────────────────────
-var _offset = 0, _ultimaRicerca = null;
+var _offset = 0, _ultimaRicerca = null, _ricercaN = 0;
+
+// Svuota la lista su cui lavorano «Importa» e «Dossier».
+// Serve perché quei due comandi SPENDONO: il dossier paga una ricerca LinkedIn
+// per persona. Se una ricerca torna vuota o fallisce e la lista precedente resta
+// appesa al contenitore, il prossimo «Dossier dei primi 10» paga dieci ricerche
+// su consulenti che non c'entrano più con i filtri a schermo.
+function scordaProfili() {
+    var cont = document.getElementById('albo-risultati');
+    if (cont) cont._profili = null;
+}
 
 async function cercaAlbo(offset) {
     var cont = document.getElementById('albo-risultati');
@@ -458,7 +478,13 @@ async function cercaAlbo(offset) {
     var errore = document.getElementById('albo-errore');
     errore.classList.add('hidden');
     stato.textContent = 'Cerco…';
-    _offset = offset || 0;
+    // Ogni ricerca ha un suo numero: quando torna, se nel frattempo ne è partita
+    // un'altra, la risposta vecchia viene buttata. Senza questo, due ricerche
+    // ravvicinate disegnano i risultati della prima con la paginazione della
+    // seconda, e l'utente pagina su numeri che non corrispondono a niente.
+    var mia = ++_ricercaN;
+    var mioOffset = offset || 0;
+    _offset = mioOffset;
     _ultimaRicerca = {
         rete: document.getElementById('f-rete').value,
         comune: document.getElementById('f-comune').value.trim(),
@@ -466,36 +492,51 @@ async function cercaAlbo(offset) {
         eta_min: document.getElementById('f-eta-min').value,
         eta_max: document.getElementById('f-eta-max').value,
         escludi_lavorati: !document.getElementById('f-lavorati').checked,
-        limite: 50, offset: _offset
+        limite: 50, offset: mioOffset
     };
     try {
         var r = await fetch('/albo/cerca', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(_ultimaRicerca)
         });
+        if (mia !== _ricercaN) return;           // superata da una ricerca più recente
         var d = await r.json();
-        if (!r.ok) { errore.textContent = d.errore || 'Ricerca non riuscita.'; errore.classList.remove('hidden'); stato.textContent = ''; return; }
-        disegna(d);
+        if (mia !== _ricercaN) return;
+        if (!r.ok) {
+            scordaProfili();
+            errore.textContent = d.errore || 'Ricerca non riuscita.';
+            errore.classList.remove('hidden');
+            stato.textContent = '';
+            document.getElementById('albo-azioni').classList.add('hidden');
+            return;
+        }
+        _offset = mioOffset;
+        disegna(d, mioOffset);
     } catch (e) {
+        if (mia !== _ricercaN) return;
+        scordaProfili();
         errore.textContent = 'Errore di rete durante la ricerca.';
         errore.classList.remove('hidden');
         stato.textContent = '';
+        document.getElementById('albo-azioni').classList.add('hidden');
     }
 }
 
-function disegna(d) {
+function disegna(d, offset) {
     var cont = document.getElementById('albo-risultati');
     var stato = document.getElementById('albo-stato');
     var azioni = document.getElementById('albo-azioni');
+    if (offset === undefined) offset = _offset;
     cont.innerHTML = '';
-    if (!d.profili.length) {
+    cont._profili = d.profili || [];        // anche se vuota: vedi scordaProfili()
+    if (!cont._profili.length) {
         stato.textContent = 'Nessun consulente con questi filtri.';
         azioni.classList.add('hidden');
         document.getElementById('albo-paginazione').innerHTML = '';
         return;
     }
     stato.innerHTML = '<strong>' + d.totale + '</strong> consulenti corrispondono · '
-        + 'ne mostro ' + d.profili.length + ' (dal ' + (_offset + 1) + '&deg;) · '
+        + 'ne mostro ' + d.profili.length + ' (dal ' + (offset + 1) + '&deg;) · '
         + d.nuovi + ' non ancora in pipeline. <span style="color:var(--grigio-testo);">'
         + 'Ordinati dal più propenso a cambiare rete.</span>'
         + (d.esclusi_lavorati ? '<br><span style="color:var(--grigio-testo);">'
@@ -529,8 +570,8 @@ function disegna(d) {
     cont._profili = d.profili;
 
     var pag = '';
-    if (_offset > 0) pag += '<button class="btn btn-secondary" onclick="cercaAlbo(' + Math.max(0, _offset - 50) + ')">← Precedenti</button> ';
-    if (_offset + d.profili.length < d.totale) pag += '<button class="btn btn-secondary" onclick="cercaAlbo(' + (_offset + 50) + ')">Successivi →</button>';
+    if (offset > 0) pag += '<button class="btn btn-secondary" onclick="cercaAlbo(' + Math.max(0, offset - 50) + ')">← Precedenti</button> ';
+    if (offset + d.profili.length < d.totale) pag += '<button class="btn btn-secondary" onclick="cercaAlbo(' + (offset + 50) + ')">Successivi →</button>';
     document.getElementById('albo-paginazione').innerHTML = pag;
 }
 
@@ -547,12 +588,20 @@ async function importaSelezionati() {
     if (!scelti.length) { alert('Seleziona almeno un consulente.'); return; }
     var stato = document.getElementById('albo-stato');
     stato.textContent = 'Importo ' + scelti.length + ' consulenti…';
-    var r = await fetch('/albo/importa', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({profili: scelti})
-    });
-    var d = await r.json();
-    if (d.ok) {
+    var r, d;
+    try {
+        r = await fetch('/albo/importa', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({profili: scelti})
+        });
+        d = await r.json();
+    } catch (e) {
+        // Senza questo, un 500 che risponde HTML faceva fallire json() e la
+        // pagina restava a «Importo N consulenti…» per sempre.
+        stato.textContent = 'Import non riuscito: controlla la connessione e riprova.';
+        return;
+    }
+    if (r.ok && d.ok) {
         stato.innerHTML = 'Importati <strong>' + d.inseriti + '</strong> in pipeline'
             + (d.saltati ? ' · ' + d.saltati + ' saltati (già presenti)' : '') + '.';
         cercaAlbo(_offset);
@@ -567,10 +616,19 @@ async function mostraColleghi(btn, rete, provincia) {
     if (box.dataset.aperto === '1') { box.innerHTML = ''; box.dataset.aperto = '0'; return; }
     box.innerHTML = '<span class="spinner"></span> Carico…';
     box.dataset.aperto = '1';
-    var d = await (await fetch('/albo/colleghi', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({rete: rete, provincia: provincia})
-    })).json();
+    var d;
+    try {
+        var r = await fetch('/albo/colleghi', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({rete: rete, provincia: provincia})
+        });
+        if (!r.ok) throw new Error('http ' + r.status);
+        d = await r.json();
+    } catch (e) {
+        box.innerHTML = '<em>Non sono riuscito a caricare l’elenco: riprova.</em>';
+        box.dataset.aperto = '0';
+        return;
+    }
     if (!d.profili || !d.profili.length) { box.innerHTML = '<em>Nessuno.</em>'; return; }
     box.innerHTML = '<table class="table"><thead><tr><th></th><th>Consulente</th><th>Comune</th><th>Età</th></tr></thead><tbody>'
         + d.profili.map(function (p, i) {
@@ -590,17 +648,36 @@ async function importaColleghi(btn) {
         scelti.push(box._profili[parseInt(c.dataset.i, 10)]);
     });
     if (!scelti.length) { alert('Seleziona almeno un consulente.'); return; }
-    var d = await (await fetch('/albo/importa', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({profili: scelti})
-    })).json();
+    btn.disabled = true;
+    var d, ok = false;
+    try {
+        var r = await fetch('/albo/importa', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({profili: scelti})
+        });
+        d = await r.json();
+        ok = r.ok && d.ok;
+    } catch (e) {
+        d = {errore: 'Errore di rete: riprova.'};
+    }
+    btn.disabled = false;
     btn.insertAdjacentHTML('afterend', '<div style="font-size:0.82rem;margin-top:0.4rem;">'
-        + (d.ok ? 'Importati ' + d.inseriti + (d.saltati ? ' · ' + d.saltati + ' già presenti' : '') : esc(d.errore || 'Errore')) + '</div>');
+        + (ok ? 'Importati ' + d.inseriti + (d.saltati ? ' · ' + d.saltati + ' già presenti' : '') : esc(d.errore || 'Errore')) + '</div>');
 }
 
 async function archiviaSegnalazione(btn) {
     btn.disabled = true;
-    await fetch('/albo/squadre-viste', {method: 'POST'});
+    try {
+        var r = await fetch('/albo/squadre-viste', {method: 'POST'});
+        if (!r.ok) throw new Error('http ' + r.status);
+    } catch (e) {
+        // La segnalazione si toglie solo se il server l'ha archiviata davvero:
+        // farla sparire comunque significa dire all'utente «visto» su qualcosa
+        // che al prossimo caricamento ricompare.
+        btn.disabled = false;
+        btn.textContent = 'Non salvato, riprova';
+        return;
+    }
     var card = btn.closest('.card');
     if (card) card.remove();
 }
