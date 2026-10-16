@@ -83,30 +83,46 @@ def sincronizza(elenco: str = "abilitati", zip_bytes: bytes = None) -> dict:
         _registra_sync(esito)
         return esito
 
+    esito["totale"] = len(righe)
+    esito["data_elenco"] = d_elenco.isoformat()
+
     # Un archivio TRONCATO è leggibile quanto uno completo: contiene righe
     # valide, solo molte di meno. Applicarlo marcherebbe come «uscito dall'albo»
     # tutto ciò che manca — e quei movimenti falsi finirebbero nello storico su
     # cui è stimata la propensione. Un calo reale di un terzo degli iscritti in
     # una settimana non esiste: se lo vediamo, è il download ad essere rotto.
+    #
+    # Si contano le CHIAVI UNICHE, non le righe: lo staging scarta i duplicati,
+    # quindi un file con molte ripetizioni supererebbe la soglia pur portando
+    # pochi iscritti distinti, e il controllo si rivelerebbe solo un conforto.
+    distinte = len({r["chiave"] for r in righe})
+    db = None
     try:
         db = get_db()
         attuali = db.execute(
             "SELECT COUNT(*) AS n FROM ocf_iscritti WHERE elenco = ? AND attivo = TRUE",
             (elenco,)).fetchone()["n"] or 0
-        db.close()
-    except Exception:
-        attuali = 0
-    if attuali and len(righe) < attuali * SOGLIA_COMPLETEZZA:
+    except Exception as e:
+        # Senza il confronto non possiamo sapere se l'elenco è completo: meglio
+        # fermarsi che applicare alla cieca un aggiornamento che cancella.
+        logger.error("OCF sync: archivio non interrogabile: %s", e, exc_info=True)
+        esito["errore"] = (f"Impossibile verificare la completezza dell'elenco: {e}. "
+                           "Sincronizzazione annullata.")
+        _registra_sync(esito)
+        return esito
+    finally:
+        if db is not None:
+            db.close()
+
+    if attuali and distinte < attuali * SOGLIA_COMPLETEZZA:
         esito["errore"] = (
-            f"Elenco sospetto: {len(righe)} righe contro le {attuali} in archivio "
-            f"({len(righe) / attuali * 100:.0f}%). Sembra un download parziale: "
-            "sincronizzazione annullata per non marcare come usciti gli assenti.")
+            f"Elenco sospetto: {distinte} iscritti distinti contro i {attuali} in "
+            f"archivio ({distinte / attuali * 100:.0f}%). Sembra un download "
+            "parziale: sincronizzazione annullata per non marcare come usciti "
+            "gli assenti.")
         logger.error("OCF sync: %s", esito["errore"])
         _registra_sync(esito)
         return esito
-
-    esito["totale"] = len(righe)
-    esito["data_elenco"] = d_elenco.isoformat()
 
     conn = _get_raw_connection()
     cur = conn.cursor()
@@ -248,13 +264,21 @@ def sincronizza(elenco: str = "abilitati", zip_bytes: bytes = None) -> dict:
                AND NOT EXISTS (SELECT 1 FROM ocf_stg s WHERE s.chiave = i.chiave)
         """, (elenco,))
 
-        conn.commit()
+        # Storico e snapshot nella stessa transazione: o si vedono insieme,
+        # o non si vede nessuno dei due.
         esito["ok"] = True
+        _riga_sync(cur, esito)
+        conn.commit()
+        esito["_storico_scritto"] = True
         logger.info("OCF sync %s: %d righe, %d nuovi, %d cambi rete, %d usciti",
                     elenco, esito["totale"], esito["nuovi"], esito["cambi_rete"], esito["usciti"])
     except Exception as e:
         conn.rollback()
         logger.error("OCF sync: errore in scrittura: %s", e, exc_info=True)
+        # `ok` viene alzato prima del commit perché la riga di storico lo legge:
+        # se il commit fallisce va riabbassato, altrimenti lo storico
+        # registrerebbe come riuscita una sincronizzazione annullata.
+        esito["ok"] = False
         esito["errore"] = f"Sincronizzazione non riuscita: {e}"
     finally:
         try:
@@ -264,7 +288,15 @@ def sincronizza(elenco: str = "abilitati", zip_bytes: bytes = None) -> dict:
         cur.close()
         conn.close()
 
-    _registra_sync(esito)
+    if not esito.pop("_storico_scritto", False):
+        _registra_sync(esito)
+    else:
+        # Lo storico c'è già; resta da avvisare chi tiene l'albo in memoria.
+        try:
+            from services.linkedin_eco import invalida_indice
+            invalida_indice()
+        except Exception:  # pragma: no cover
+            pass
     return esito
 
 
@@ -313,6 +345,25 @@ def _marca_societari(cur, data_elenco) -> int:
     if marcati:
         logger.info("Sync OCF: %d movimenti marcati come societari", marcati)
     return marcati
+
+
+def _riga_sync(cur, esito: dict) -> None:
+    """
+    Scrive la riga di storico usando il cursore della transazione in corso.
+
+    Deve stare DENTRO la transazione dello snapshot e prima del rilascio del
+    lucchetto: il rifiuto degli elenchi vecchi legge proprio ocf_sync, e se la
+    riga arrivasse dopo l'unlock un altro processo vedrebbe i dati nuovi senza
+    vedere la sincronizzazione che li ha prodotti — e accetterebbe un elenco
+    anteriore, riportando indietro le reti.
+    """
+    cur.execute(
+        "INSERT INTO ocf_sync (elenco, data_elenco, totale, nuovi, cambi_rete, "
+        "usciti, esito, errore) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+        (esito.get("elenco"), esito.get("data_elenco"), esito.get("totale", 0),
+         esito.get("nuovi", 0), esito.get("cambi_rete", 0), esito.get("usciti", 0),
+         "ok" if esito.get("ok") else "errore", esito.get("errore")),
+    )
 
 
 def _registra_sync(esito: dict) -> None:

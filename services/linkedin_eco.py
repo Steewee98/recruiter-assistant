@@ -79,35 +79,35 @@ def _carica_indice(forza: bool = False) -> dict:
     # entrato. La versione è l'ultima sync riuscita più il numero di iscritti.
     db = get_db()
     try:
-        v = db.execute("""
-            SELECT (SELECT MAX(eseguito_il) FROM ocf_sync WHERE esito = 'ok') AS sync,
-                   (SELECT COUNT(*) FROM ocf_iscritti WHERE attivo = TRUE) AS quanti
-        """).fetchone()
-        versione = f"{(v or {}).get('sync')}|{(v or {}).get('quanti')}"
-
-        if not forza and _indice["versione"] == versione and _indice["mappa"] is not None:
-            return _indice["mappa"]
-
-        # Tutto l'albo, per sapere se un nome è davvero unico in Italia.
-        tutti = db.execute("""
-            SELECT chiave, nome, cognome, provincia FROM ocf_iscritti
+        # Una sola lettura per tutto. Con due query separate, una
+        # sincronizzazione che finisse fra l'una e l'altra lascerebbe l'indice
+        # con l'albo nazionale di prima e il bacino di dopo: il conteggio degli
+        # omonimi non corrisponderebbe più alle persone, ed è esattamente il
+        # dato su cui si decide se attribuire un nome.
+        righe = db.execute("""
+            SELECT chiave, nome, cognome, provincia, rete, comune, anno_nascita
+              FROM ocf_iscritti
              WHERE attivo = TRUE
         """).fetchall()
-        # Solo il bacino, per i dati che servono a lavorare la persona.
-        locali = db.execute("""
-            SELECT chiave, nome, cognome, rete, comune, provincia, anno_nascita
-              FROM ocf_iscritti
-             WHERE attivo = TRUE AND provincia = ? AND COALESCE(rete,'') <> ''
-        """, (albo_ocf.PROVINCIA_OPERATIVA,)).fetchall()
+        v = db.execute("""
+            SELECT MAX(eseguito_il) AS sync FROM ocf_sync WHERE esito = 'ok'
+        """).fetchone()
     finally:
         db.close()
 
-    conteggio, bacino = {}, {}
-    for r in locali:
-        bacino[r["chiave"]] = dict(r)
+    # La versione è l'ultima sincronizzazione riuscita più la dimensione dei
+    # dati appena letti: così la cache scade quando l'albo cambia davvero, non
+    # a mezzanotte.
+    versione = f"{(v or {}).get('sync')}|{len(righe)}"
+    if not forza and _indice["versione"] == versione and _indice["mappa"] is not None:
+        return _indice["mappa"]
 
-    for r in tutti:
-        nome, cognome = r["nome"] or "", r["cognome"] or ""
+    conteggio, bacino = {}, {}
+    for r in righe:
+        d = dict(r)
+        if d.get("provincia") == albo_ocf.PROVINCIA_OPERATIVA and (d.get("rete") or ""):
+            bacino[d["chiave"]] = d
+        nome, cognome = d.get("nome") or "", d.get("cognome") or ""
         # Due forme per ogni persona: «nome cognome» e «cognome nome». Su
         # LinkedIn l'ordine non è garantito. Si usa un insieme di chiavi perché
         # per chi si chiama «Luca Luca» le due forme coincidono, e la stessa
@@ -115,13 +115,13 @@ def _carica_indice(forza: bool = False) -> dict:
         for forma in (f"{nome} {cognome}", f"{cognome} {nome}"):
             k = _normalizza(forma)
             if k:
-                conteggio.setdefault(k, set()).add(r["chiave"])
+                conteggio.setdefault(k, set()).add(d["chiave"])
 
     mappa = {"conteggio": conteggio, "bacino": bacino}
     _indice["versione"] = versione
     _indice["mappa"] = mappa
     logger.info("Indice LinkedIn: %d nomi su %d iscritti nazionali, %d nel bacino",
-                len(conteggio), len(tutti), len(bacino))
+                len(conteggio), len(righe), len(bacino))
     return mappa
 
 
