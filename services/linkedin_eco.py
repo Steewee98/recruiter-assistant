@@ -35,7 +35,13 @@ RICONOSCIUTO = "riconosciuto"      # una sola corrispondenza nel bacino
 AMBIGUO = "ambiguo"                # più persone con lo stesso nome: non si assegna
 FUORI = "fuori_bacino"             # non è nell'albo di questa provincia
 
-_indice = {"chiave_cache": None, "mappa": None}
+_indice = {"versione": None, "mappa": None}
+
+
+def invalida_indice() -> None:
+    """Forza la ricostruzione dell'indice: da chiamare dopo una sincronizzazione."""
+    _indice["versione"] = None
+    _indice["mappa"] = None
 
 
 def _normalizza(testo: str) -> str:
@@ -62,12 +68,22 @@ def _carica_indice(forza: bool = False) -> dict:
     """
     from services import albo_ocf
 
-    oggi = date.today().isoformat()
-    if not forza and _indice["chiave_cache"] == oggi and _indice["mappa"] is not None:
-        return _indice["mappa"]
-
+    # La validità dell'indice non si misura in giorni ma in sincronizzazioni:
+    # l'albo si aggiorna quando arriva un elenco nuovo, e dopo quel momento una
+    # cache «di oggi» riconoscerebbe ancora chi è uscito e ignorerebbe chi è
+    # entrato. La versione è l'ultima sync riuscita più il numero di iscritti.
     db = get_db()
     try:
+        v = db.execute("""
+            SELECT (SELECT MAX(eseguito_il) FROM ocf_sync WHERE esito = 'ok') AS sync,
+                   (SELECT COUNT(*) FROM ocf_iscritti
+                     WHERE attivo = TRUE AND provincia = ?) AS quanti
+        """, (albo_ocf.PROVINCIA_OPERATIVA,)).fetchone()
+        versione = f"{(v or {}).get('sync')}|{(v or {}).get('quanti')}"
+
+        if not forza and _indice["versione"] == versione and _indice["mappa"] is not None:
+            return _indice["mappa"]
+
         righe = db.execute("""
             SELECT chiave, nome, cognome, rete, comune, provincia, anno_nascita
               FROM ocf_iscritti
@@ -82,12 +98,17 @@ def _carica_indice(forza: bool = False) -> dict:
         nome, cognome = d.get("nome") or "", d.get("cognome") or ""
         # Due chiavi per ogni persona: «nome cognome» e «cognome nome». Su
         # LinkedIn l'ordine non è garantito, e alcune reti esportano al contrario.
+        # Le due forme vanno in insieme, non in lista: per chi si chiama
+        # «Luca Luca» coincidono, e la stessa persona finirebbe contata due
+        # volte e scartata come omonima di se stessa.
         for forma in (f"{nome} {cognome}", f"{cognome} {nome}"):
             k = _normalizza(forma)
-            if k:
-                mappa.setdefault(k, []).append(d)
+            if not k:
+                continue
+            per_chiave = mappa.setdefault(k, {})
+            per_chiave[d["chiave"]] = d
 
-    _indice["chiave_cache"] = oggi
+    _indice["versione"] = versione
     _indice["mappa"] = mappa
     logger.info("Indice albo per LinkedIn: %d nomi su %d iscritti", len(mappa), len(righe))
     return mappa
@@ -101,6 +122,11 @@ def riconosci(nomi: list) -> list:
     mappa = _carica_indice()
     fuori = []
     for grezzo in nomi:
+        # Gli elenchi incollati da LinkedIn arrivano sporchi: righe vuote,
+        # None, a volte numeri. Un nome non valido è un nome fuori bacino,
+        # non un motivo per far cadere l'intero lotto.
+        if not isinstance(grezzo, str):
+            grezzo = "" if grezzo is None else str(grezzo)
         pulito = _normalizza(grezzo)
         if not pulito or len(pulito.split()) < 2:
             # Un nome di una parola sola non è attribuibile: su LinkedIn capita
@@ -109,7 +135,7 @@ def riconosci(nomi: list) -> list:
                           "motivo": "nome incompleto", "persona": None})
             continue
 
-        trovati = mappa.get(pulito, [])
+        trovati = list(mappa.get(pulito, {}).values())
         if len(trovati) == 1:
             p = dict(trovati[0])
             p["eta"] = (date.today().year - p["anno_nascita"]) if p.get("anno_nascita") else None
@@ -137,7 +163,7 @@ def registra(nomi: list, tipo: str = "commento", post: str = "") -> dict:
             db.execute("""
                 INSERT INTO linkedin_interazioni (nome_mostrato, chiave, esito, tipo, post)
                 VALUES (?, ?, ?, ?, ?)
-            """, (e["nome_mostrato"][:200],
+            """, (str(e["nome_mostrato"] or "")[:200],
                   (e["persona"] or {}).get("chiave"),
                   e["esito"], tipo, (post or "")[:200]))
         db.commit()

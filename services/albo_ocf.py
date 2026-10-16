@@ -268,6 +268,14 @@ def _marca_societari(cur, data_elenco) -> int:
 
 def _registra_sync(esito: dict) -> None:
     """Scrive una riga di storico in ocf_sync. Non solleva mai."""
+    # L'albo è appena cambiato: chi tiene in memoria una copia dei nominativi
+    # deve ricostruirla, altrimenti continua a riconoscere chi è uscito e a
+    # ignorare chi è entrato con questo elenco.
+    try:
+        from services.linkedin_eco import invalida_indice
+        invalida_indice()
+    except Exception:  # pragma: no cover — non deve mai far fallire la sync
+        pass
     try:
         db = get_db()
         db.execute(

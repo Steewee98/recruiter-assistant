@@ -28,24 +28,29 @@ def _pulisci():
 
 def _un_iscritto():
     """
-    Una persona vera del bacino, per provare il riconoscimento sui dati reali.
+    Una persona del bacino il cui nome è UNIVOCO secondo le stesse regole del
+    servizio: normalizzato e considerando anche la forma «cognome nome».
 
-    Niente LIKE '% %' qui: psycopg2 legge il carattere percento come un
-    segnaposto e la query esplode appena le si passa un parametro. Con strpos
-    si chiede la stessa cosa senza caratteri che il driver deve interpretare.
+    Prendere il primo iscritto qualunque non basta: se capita un omonimo, il
+    servizio risponde correttamente AMBIGUO e il test fallisce accusando un
+    difetto che non c'è. La selezione va fatta con il criterio che il codice
+    userà davvero, non con uno approssimato.
     """
-    from database import get_db
-    from services import albo_ocf
-    db = get_db()
-    try:
-        return dict(db.execute("""
-            SELECT chiave, nome, cognome FROM ocf_iscritti
-             WHERE attivo = TRUE AND provincia = ? AND COALESCE(rete,'') <> ''
-               AND strpos(nome, ' ') = 0 AND strpos(cognome, ' ') = 0
-             ORDER BY chiave LIMIT 1
-        """, (albo_ocf.PROVINCIA_OPERATIVA,)).fetchone())
-    finally:
-        db.close()
+    from services import linkedin_eco as L
+
+    mappa = L._carica_indice(forza=True)
+    univoci = [list(v.values())[0] for v in mappa.values() if len(v) == 1]
+    # Serve un nome di due sole parole: con tre o più, nome e cognome si
+    # possono ricomporre in modi diversi e il test non proverebbe ciò che crede.
+    for p in sorted(univoci, key=lambda x: x["chiave"]):
+        nome, cognome = (p.get("nome") or "").strip(), (p.get("cognome") or "").strip()
+        if " " in nome or " " in cognome or not nome or not cognome:
+            continue
+        diretto = L._normalizza(f"{nome} {cognome}")
+        inverso = L._normalizza(f"{cognome} {nome}")
+        if len(mappa.get(diretto, {})) == 1 and len(mappa.get(inverso, {})) == 1:
+            return dict(p)
+    return None
 
 
 def test_normalizzazione_regge_accenti_e_punteggiatura():
@@ -61,7 +66,7 @@ def test_riconosce_una_persona_vera_del_bacino():
     from services import linkedin_eco as L
 
     p = _un_iscritto()
-    assert p, "l'albo di Roma non può essere vuoto"
+    assert p, "serve almeno un nome univoco nel bacino"
     nome_pieno = f"{p['nome']} {p['cognome']}"
 
     r = L.riconosci([nome_pieno])[0]
