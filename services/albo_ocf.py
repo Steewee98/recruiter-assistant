@@ -46,6 +46,10 @@ BATCH = 5000
 # rilasciato da solo alla chiusura della connessione, anche se il processo muore.
 LUCCHETTO_SYNC = 918273645
 
+# Quota minima di righe rispetto all'archivio perché un elenco sia credibile.
+# Sotto questa soglia si assume un download parziale e non si applica nulla.
+SOGLIA_COMPLETEZZA = 0.70
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Sincronizzazione
@@ -79,6 +83,28 @@ def sincronizza(elenco: str = "abilitati", zip_bytes: bytes = None) -> dict:
         _registra_sync(esito)
         return esito
 
+    # Un archivio TRONCATO è leggibile quanto uno completo: contiene righe
+    # valide, solo molte di meno. Applicarlo marcherebbe come «uscito dall'albo»
+    # tutto ciò che manca — e quei movimenti falsi finirebbero nello storico su
+    # cui è stimata la propensione. Un calo reale di un terzo degli iscritti in
+    # una settimana non esiste: se lo vediamo, è il download ad essere rotto.
+    try:
+        db = get_db()
+        attuali = db.execute(
+            "SELECT COUNT(*) AS n FROM ocf_iscritti WHERE elenco = ? AND attivo = TRUE",
+            (elenco,)).fetchone()["n"] or 0
+        db.close()
+    except Exception:
+        attuali = 0
+    if attuali and len(righe) < attuali * SOGLIA_COMPLETEZZA:
+        esito["errore"] = (
+            f"Elenco sospetto: {len(righe)} righe contro le {attuali} in archivio "
+            f"({len(righe) / attuali * 100:.0f}%). Sembra un download parziale: "
+            "sincronizzazione annullata per non marcare come usciti gli assenti.")
+        logger.error("OCF sync: %s", esito["errore"])
+        _registra_sync(esito)
+        return esito
+
     esito["totale"] = len(righe)
     esito["data_elenco"] = d_elenco.isoformat()
 
@@ -91,6 +117,29 @@ def sincronizza(elenco: str = "abilitati", zip_bytes: bytes = None) -> dict:
             esito["errore"] = "Sincronizzazione già in corso su un altro processo."
             cur.close()
             conn.close()
+            return esito
+
+        # L'elenco non deve mai tornare indietro nel tempo. Applicare un
+        # archivio più vecchio di quello già acquisito rimetterebbe le reti
+        # com'erano allora, e al confronto successivo quei ritorni verrebbero
+        # letti come passaggi di rete veri: lo storico si riempirebbe di
+        # movimenti mai avvenuti. Rieseguire la STESSA data resta permesso,
+        # perché è l'idempotenza su cui conta il pianificatore.
+        cur.execute("""
+            SELECT MAX(data_elenco) AS ultima FROM ocf_sync
+             WHERE elenco = %s AND esito = 'ok' AND data_elenco IS NOT NULL
+        """, (elenco,))
+        ultima = (cur.fetchone() or {}).get("ultima")
+        if ultima and d_elenco < ultima:
+            esito["errore"] = (
+                f"Elenco del {d_elenco.isoformat()} più vecchio dell'ultimo "
+                f"acquisito ({ultima.isoformat() if hasattr(ultima, 'isoformat') else ultima}): "
+                "non applicato per non generare passaggi di rete inesistenti.")
+            logger.warning("OCF sync: %s", esito["errore"])
+            cur.execute("SELECT pg_advisory_unlock(%s)", (LUCCHETTO_SYNC,))
+            cur.close()
+            conn.close()
+            _registra_sync(esito)
             return esito
 
         # 1) Staging temporanea (vive quanto la transazione)

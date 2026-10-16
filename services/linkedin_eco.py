@@ -60,11 +60,16 @@ def _normalizza(testo: str) -> str:
 
 def _carica_indice(forza: bool = False) -> dict:
     """
-    Indice in memoria del bacino: nome completo normalizzato → lista di chiavi.
+    Due strutture, e la distinzione fra le due è il punto di tutto:
 
-    Il bacino è di poche migliaia di righe: tenerlo in memoria evita una query
-    per ogni nome da riconoscere, che su un elenco di cento commenti sarebbero
-    cento interrogazioni al database per un confronto fra stringhe.
+      conteggio  nome normalizzato → chiavi di TUTTO l'albo nazionale
+      bacino     chiave → dati completi, solo per la provincia operativa
+
+    L'univocità va verificata sull'albo intero, non sul bacino. Caricando solo
+    Roma, un «Marco Rossi» di Milano che commenta un post verrebbe attribuito
+    al Marco Rossi romano: su 56.000 iscritti gli omonimi fra province sono la
+    norma, non l'eccezione. I dati completi invece servono solo per chi
+    potremmo davvero chiamare, e tenerli per tutti sprecherebbe memoria.
     """
     from services import albo_ocf
 
@@ -76,15 +81,20 @@ def _carica_indice(forza: bool = False) -> dict:
     try:
         v = db.execute("""
             SELECT (SELECT MAX(eseguito_il) FROM ocf_sync WHERE esito = 'ok') AS sync,
-                   (SELECT COUNT(*) FROM ocf_iscritti
-                     WHERE attivo = TRUE AND provincia = ?) AS quanti
-        """, (albo_ocf.PROVINCIA_OPERATIVA,)).fetchone()
+                   (SELECT COUNT(*) FROM ocf_iscritti WHERE attivo = TRUE) AS quanti
+        """).fetchone()
         versione = f"{(v or {}).get('sync')}|{(v or {}).get('quanti')}"
 
         if not forza and _indice["versione"] == versione and _indice["mappa"] is not None:
             return _indice["mappa"]
 
-        righe = db.execute("""
+        # Tutto l'albo, per sapere se un nome è davvero unico in Italia.
+        tutti = db.execute("""
+            SELECT chiave, nome, cognome, provincia FROM ocf_iscritti
+             WHERE attivo = TRUE
+        """).fetchall()
+        # Solo il bacino, per i dati che servono a lavorare la persona.
+        locali = db.execute("""
             SELECT chiave, nome, cognome, rete, comune, provincia, anno_nascita
               FROM ocf_iscritti
              WHERE attivo = TRUE AND provincia = ? AND COALESCE(rete,'') <> ''
@@ -92,25 +102,26 @@ def _carica_indice(forza: bool = False) -> dict:
     finally:
         db.close()
 
-    mappa = {}
-    for r in righe:
-        d = dict(r)
-        nome, cognome = d.get("nome") or "", d.get("cognome") or ""
-        # Due chiavi per ogni persona: «nome cognome» e «cognome nome». Su
-        # LinkedIn l'ordine non è garantito, e alcune reti esportano al contrario.
-        # Le due forme vanno in insieme, non in lista: per chi si chiama
-        # «Luca Luca» coincidono, e la stessa persona finirebbe contata due
-        # volte e scartata come omonima di se stessa.
+    conteggio, bacino = {}, {}
+    for r in locali:
+        bacino[r["chiave"]] = dict(r)
+
+    for r in tutti:
+        nome, cognome = r["nome"] or "", r["cognome"] or ""
+        # Due forme per ogni persona: «nome cognome» e «cognome nome». Su
+        # LinkedIn l'ordine non è garantito. Si usa un insieme di chiavi perché
+        # per chi si chiama «Luca Luca» le due forme coincidono, e la stessa
+        # persona finirebbe contata due volte e scartata come omonima di sé.
         for forma in (f"{nome} {cognome}", f"{cognome} {nome}"):
             k = _normalizza(forma)
-            if not k:
-                continue
-            per_chiave = mappa.setdefault(k, {})
-            per_chiave[d["chiave"]] = d
+            if k:
+                conteggio.setdefault(k, set()).add(r["chiave"])
 
+    mappa = {"conteggio": conteggio, "bacino": bacino}
     _indice["versione"] = versione
     _indice["mappa"] = mappa
-    logger.info("Indice albo per LinkedIn: %d nomi su %d iscritti", len(mappa), len(righe))
+    logger.info("Indice LinkedIn: %d nomi su %d iscritti nazionali, %d nel bacino",
+                len(conteggio), len(tutti), len(bacino))
     return mappa
 
 
@@ -135,18 +146,29 @@ def riconosci(nomi: list) -> list:
                           "motivo": "nome incompleto", "persona": None})
             continue
 
-        trovati = list(mappa.get(pulito, {}).values())
-        if len(trovati) == 1:
-            p = dict(trovati[0])
-            p["eta"] = (date.today().year - p["anno_nascita"]) if p.get("anno_nascita") else None
-            fuori.append({"nome_mostrato": grezzo, "esito": RICONOSCIUTO,
-                          "motivo": "", "persona": p})
-        elif len(trovati) > 1:
+        chiavi = mappa["conteggio"].get(pulito, set())
+        if len(chiavi) > 1:
+            # Omonimi: non importa che uno solo sia di Roma. Non sappiamo quale
+            # dei due ha commentato, e tirare a indovinare qui significa mandare
+            # Sabia dalla persona sbagliata.
             fuori.append({"nome_mostrato": grezzo, "esito": AMBIGUO,
-                          "motivo": f"{len(trovati)} omonimi nell'albo", "persona": None})
+                          "motivo": f"{len(chiavi)} omonimi nell'albo nazionale",
+                          "persona": None})
+        elif len(chiavi) == 1:
+            chiave = next(iter(chiavi))
+            p = mappa["bacino"].get(chiave)
+            if p:
+                p = dict(p)
+                p["eta"] = (date.today().year - p["anno_nascita"]) if p.get("anno_nascita") else None
+                fuori.append({"nome_mostrato": grezzo, "esito": RICONOSCIUTO,
+                              "motivo": "", "persona": p})
+            else:
+                fuori.append({"nome_mostrato": grezzo, "esito": FUORI,
+                              "motivo": "iscritto all'albo ma fuori dalla provincia",
+                              "persona": None})
         else:
             fuori.append({"nome_mostrato": grezzo, "esito": FUORI,
-                          "motivo": "non nell'albo di Roma", "persona": None})
+                          "motivo": "non risulta nell'albo", "persona": None})
     return fuori
 
 

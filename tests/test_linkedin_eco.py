@@ -28,27 +28,29 @@ def _pulisci():
 
 def _un_iscritto():
     """
-    Una persona del bacino il cui nome è UNIVOCO secondo le stesse regole del
-    servizio: normalizzato e considerando anche la forma «cognome nome».
+    Una persona del bacino il cui nome è UNIVOCO in tutto l'albo nazionale,
+    secondo le stesse regole del servizio: normalizzato e considerando anche la
+    forma «cognome nome».
 
-    Prendere il primo iscritto qualunque non basta: se capita un omonimo, il
-    servizio risponde correttamente AMBIGUO e il test fallisce accusando un
-    difetto che non c'è. La selezione va fatta con il criterio che il codice
-    userà davvero, non con uno approssimato.
+    Prendere il primo iscritto qualunque non basta: se capita un omonimo — anche
+    di un'altra provincia — il servizio risponde correttamente AMBIGUO e il test
+    fallisce accusando un difetto che non c'è.
     """
     from services import linkedin_eco as L
 
     mappa = L._carica_indice(forza=True)
-    univoci = [list(v.values())[0] for v in mappa.values() if len(v) == 1]
-    # Serve un nome di due sole parole: con tre o più, nome e cognome si
-    # possono ricomporre in modi diversi e il test non proverebbe ciò che crede.
-    for p in sorted(univoci, key=lambda x: x["chiave"]):
+    conteggio, bacino = mappa["conteggio"], mappa["bacino"]
+
+    for chiave in sorted(bacino):
+        p = bacino[chiave]
         nome, cognome = (p.get("nome") or "").strip(), (p.get("cognome") or "").strip()
-        if " " in nome or " " in cognome or not nome or not cognome:
+        # Serve un nome di due sole parole: con tre o più, nome e cognome si
+        # possono ricomporre in modi diversi e il test non proverebbe ciò che crede.
+        if not nome or not cognome or " " in nome or " " in cognome:
             continue
         diretto = L._normalizza(f"{nome} {cognome}")
         inverso = L._normalizza(f"{cognome} {nome}")
-        if len(mappa.get(diretto, {})) == 1 and len(mappa.get(inverso, {})) == 1:
+        if len(conteggio.get(diretto, ())) == 1 and len(conteggio.get(inverso, ())) == 1:
             return dict(p)
     return None
 
@@ -112,30 +114,119 @@ def test_nome_di_una_parola_sola_non_viene_attribuito():
 
 def test_omonimi_restano_ambigui_e_non_vengono_assegnati():
     """
-    Il guardrail più importante: se due persone dell'albo hanno lo stesso nome,
-    nessuna delle due viene attribuita. Assegnare al primo gonfierebbe la
-    metrica e manderebbe Sabia dalla persona sbagliata.
+    Il guardrail principale, provato su dati costruiti apposta.
+
+    Prima questo test cercava due omonimi nell'albo e, se non li trovava,
+    passava senza verificare niente: il controllo più importante del servizio
+    poteva restare scoperto per mesi senza che nessuno se ne accorgesse. Ora i
+    due omonimi li creiamo noi, con chiavi riconoscibili, e li cancelliamo.
     """
     from database import get_db
     from services import albo_ocf, linkedin_eco as L
 
+    chiavi = ("zzz-test-omonimo-1", "zzz-test-omonimo-2")
     db = get_db()
     try:
-        doppio = db.execute("""
-            SELECT nome, cognome, COUNT(*) AS n FROM ocf_iscritti
-             WHERE attivo = TRUE AND provincia = ? AND COALESCE(rete,'') <> ''
-             GROUP BY nome, cognome HAVING COUNT(*) > 1 LIMIT 1
-        """, (albo_ocf.PROVINCIA_OPERATIVA,)).fetchone()
-    finally:
+        for k in chiavi:
+            db.execute("""
+                INSERT INTO ocf_iscritti (chiave, nome, cognome, anno_nascita, comune,
+                                          provincia, regione, rete, elenco, attivo)
+                VALUES (?, 'Zelmiro', 'Testoni', 1980, 'Roma', ?, 'Lazio',
+                        'Rete Di Prova', 'abilitati', TRUE)
+                ON CONFLICT (chiave) DO NOTHING
+            """, (k, albo_ocf.PROVINCIA_OPERATIVA))
+        db.commit()
         db.close()
 
-    if not doppio:
-        print("    (nessun omonimo nell'albo: verifica saltata)")
-        return
+        L.invalida_indice()
+        r = L.riconosci(["Zelmiro Testoni"])[0]
+        assert r["esito"] == L.AMBIGUO, r
+        assert r["persona"] is None, "un omonimo non deve mai essere attribuito"
+        assert "2" in r["motivo"], r["motivo"]
 
-    r = L.riconosci([f"{doppio['nome']} {doppio['cognome']}"])[0]
-    assert r["esito"] == L.AMBIGUO, r
-    assert r["persona"] is None, "un omonimo non deve mai essere attribuito"
+        # anche con nome e cognome invertiti l'ambiguità resta
+        r2 = L.riconosci(["Testoni Zelmiro"])[0]
+        assert r2["esito"] == L.AMBIGUO, r2
+    finally:
+        db = get_db()
+        db.execute("DELETE FROM ocf_iscritti WHERE chiave IN (?, ?)", chiavi)
+        db.commit()
+        db.close()
+        L.invalida_indice()
+
+
+def test_omonimo_fuori_provincia_non_viene_attribuito_a_quello_di_roma():
+    """
+    Il caso che il filtro per provincia nascondeva: se esiste un omonimo in
+    un'altra provincia, il commento non è attribuibile. Caricando solo Roma il
+    servizio avrebbe visto un solo nome e assegnato con sicurezza la persona
+    sbagliata.
+    """
+    from database import get_db
+    from services import albo_ocf, linkedin_eco as L
+
+    chiavi = ("zzz-test-roma", "zzz-test-milano")
+    db = get_db()
+    try:
+        db.execute("""
+            INSERT INTO ocf_iscritti (chiave, nome, cognome, anno_nascita, comune,
+                                      provincia, regione, rete, elenco, attivo)
+            VALUES (?, 'Osvaldo', 'Pernici', 1975, 'Roma', ?, 'Lazio',
+                    'Rete Di Prova', 'abilitati', TRUE)
+            ON CONFLICT (chiave) DO NOTHING
+        """, (chiavi[0], albo_ocf.PROVINCIA_OPERATIVA))
+        db.execute("""
+            INSERT INTO ocf_iscritti (chiave, nome, cognome, anno_nascita, comune,
+                                      provincia, regione, rete, elenco, attivo)
+            VALUES (?, 'Osvaldo', 'Pernici', 1975, 'Milano', 'MI', 'Lombardia',
+                    'Rete Di Prova', 'abilitati', TRUE)
+            ON CONFLICT (chiave) DO NOTHING
+        """, (chiavi[1],))
+        db.commit()
+        db.close()
+
+        L.invalida_indice()
+        r = L.riconosci(["Osvaldo Pernici"])[0]
+        assert r["esito"] == L.AMBIGUO, (
+            "l'omonimo di Milano deve rendere il nome non attribuibile, "
+            f"invece: {r}")
+        assert r["persona"] is None
+    finally:
+        db = get_db()
+        db.execute("DELETE FROM ocf_iscritti WHERE chiave IN (?, ?)", chiavi)
+        db.commit()
+        db.close()
+        L.invalida_indice()
+
+
+def test_iscritto_di_altra_provincia_non_entra_nel_bacino():
+    """Chi è nell'albo ma fuori provincia si riconosce e si dichiara, non si conta."""
+    from database import get_db
+    from services import linkedin_eco as L
+
+    chiave = "zzz-test-solo-milano"
+    db = get_db()
+    try:
+        db.execute("""
+            INSERT INTO ocf_iscritti (chiave, nome, cognome, anno_nascita, comune,
+                                      provincia, regione, rete, elenco, attivo)
+            VALUES (?, 'Ubaldo', 'Scarpellini', 1979, 'Milano', 'MI', 'Lombardia',
+                    'Rete Di Prova', 'abilitati', TRUE)
+            ON CONFLICT (chiave) DO NOTHING
+        """, (chiave,))
+        db.commit()
+        db.close()
+
+        L.invalida_indice()
+        r = L.riconosci(["Ubaldo Scarpellini"])[0]
+        assert r["esito"] == L.FUORI, r
+        assert "provincia" in r["motivo"], r["motivo"]
+    finally:
+        db = get_db()
+        db.execute("DELETE FROM ocf_iscritti WHERE chiave = ?", (chiave,))
+        db.commit()
+        db.close()
+        L.invalida_indice()
 
 
 def test_registra_e_conta_solo_persone_distinte():
