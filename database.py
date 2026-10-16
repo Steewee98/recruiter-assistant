@@ -500,6 +500,22 @@ def init_db():
         # Costo Apify effettivo del giro (differenza di consumo prima/dopo): la
         # convenienza della ricerca a gruppi va misurata, non solo prevista.
         "ALTER TABLE ocf_loop_run ADD COLUMN IF NOT EXISTS costo NUMERIC(10,4)",
+        # ── Interazioni LinkedIn ricondotte all'albo ──────────────────────
+        # Serve a rispondere all'unica domanda che conta sui contenuti: fra chi
+        # ha reagito a un post, quanti sono consulenti del nostro bacino? Le
+        # impressioni le decide LinkedIn, questo numero lo decidiamo noi.
+        """CREATE TABLE IF NOT EXISTS linkedin_interazioni (
+            id            SERIAL PRIMARY KEY,
+            nome_mostrato TEXT NOT NULL,
+            chiave        TEXT,
+            esito         TEXT NOT NULL,
+            tipo          TEXT,
+            post          TEXT,
+            rilevato_il   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_li_data ON linkedin_interazioni(rilevato_il DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_li_chiave ON linkedin_interazioni(chiave)",
+
         # ── Classifica «chi chiamare adesso» ──────────────────────────────
         # Viene rigenerata una volta a settimana, dopo la sincronizzazione
         # dell'albo, e resta ferma fino alla successiva: chi telefona lavora la
