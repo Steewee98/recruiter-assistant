@@ -516,6 +516,53 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_li_data ON linkedin_interazioni(rilevato_il DESC)",
         "CREATE INDEX IF NOT EXISTS idx_li_chiave ON linkedin_interazioni(chiave)",
 
+        # ── Post dei profili che vogliamo reclutare ───────────────────────
+        # Si scaricano i post di chi è già in pipeline per proporre a Sabia
+        # dove vale la pena farsi vedere con un commento. «urn» è l'identificativo
+        # che LinkedIn dà al post: è l'unica chiave stabile, perché lo stesso post
+        # torna a ogni passata e non va salvato due volte.
+        """CREATE TABLE IF NOT EXISTS linkedin_post (
+            urn            TEXT PRIMARY KEY,
+            candidato_id   INTEGER REFERENCES candidati(id) ON DELETE SET NULL,
+            autore_nome    TEXT,
+            autore_url     TEXT,
+            testo          TEXT,
+            url            TEXT,
+            pubblicato_il  TIMESTAMP,
+            reazioni       INTEGER DEFAULT 0,
+            commenti       INTEGER DEFAULT 0,
+            scartato       BOOLEAN DEFAULT FALSE,
+            motivo_scarto  TEXT,
+            punteggio      REAL DEFAULT 0,
+            visto_il       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_lpost_data   ON linkedin_post(pubblicato_il DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_lpost_scarto ON linkedin_post(scartato)",
+        "CREATE INDEX IF NOT EXISTS idx_lpost_cand   ON linkedin_post(candidato_id)",
+
+        # ── Le proposte di commento ───────────────────────────────────────
+        # Un post ha al massimo una proposta viva. Lo stato racconta il percorso:
+        #   proposto → approvato → pubblicato,  oppure  scartato.
+        # «testo_proposto» resta sempre quello generato; «testo_finale» è quello
+        # che Sabia ha davvero approvato. La differenza fra i due è il materiale
+        # su cui si corregge il modo di scrivere: senza tenerli separati, dopo
+        # venti commenti non sapremmo più che cosa sbagliamo.
+        """CREATE TABLE IF NOT EXISTS linkedin_commenti (
+            id             SERIAL PRIMARY KEY,
+            post_urn       TEXT NOT NULL REFERENCES linkedin_post(urn) ON DELETE CASCADE,
+            testo_proposto TEXT NOT NULL,
+            testo_finale   TEXT,
+            autore_testo   TEXT,
+            angolo         TEXT,
+            stato          TEXT NOT NULL DEFAULT 'proposto',
+            generato_il    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deciso_il      TIMESTAMP,
+            pubblicato_il  TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_lcom_stato ON linkedin_commenti(stato)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_lcom_post_vivo ON linkedin_commenti(post_urn) "
+        "WHERE stato <> 'scartato'",
+
         # ── Classifica «chi chiamare adesso» ──────────────────────────────
         # Viene rigenerata una volta a settimana, dopo la sincronizzazione
         # dell'albo, e resta ferma fino alla successiva: chi telefona lavora la

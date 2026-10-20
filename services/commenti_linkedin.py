@@ -1,0 +1,467 @@
+"""Trova i post dei profili che vogliamo reclutare e prepara una proposta di commento.
+
+Perché esiste
+-------------
+Con il feed per interesse, da un profilo piccolo la strada più corta verso un
+consulente non è pubblicare: è farsi vedere sotto i suoi post. Ma aprire LinkedIn
+e cercare a mano chi ha pubblicato qualcosa, fra duecento profili, non lo fa
+nessuno per più di tre giorni.
+
+Il contratto
+------------
+Il programma propone, Sabia decide, la pubblicazione è manuale:
+
+    scarico (Apify) → filtro → proposta di commento → APPROVAZIONE DI SABIA → copia-incolla
+
+Nessun commento esce da qui senza che una persona l'abbia letto. Non è una
+cautela formale: sotto il post di un consulente che vuoi reclutare, un commento
+che suona finto costa più di quanto il sistema costruisca in un mese.
+
+Quanto costa
+------------
+Lo scraper si paga a risultato: ~0,002 $ per post trovato, 0,001 $ per una
+ricerca a vuoto, e accetta al massimo 10 profili per chiamata. Con ~130 profili
+monitorabili e una passata al giorno siamo intorno al dollaro al mese.
+
+Chi scrive il testo
+-------------------
+Un commento pubblico è un testo che leggono persone fuori da Axiom: lo scrive
+Argon tramite `copywriter.scrivi`. Dove il copywriter non è installato (per
+esempio sul server) si ripiega su Claude, ma la colonna `autore_testo` lo
+registra sempre, così si sa chi ha scritto cosa.
+"""
+
+import json
+import logging
+import os
+import re
+import sys
+import urllib.request
+from datetime import datetime, timedelta
+
+from database import get_db
+
+log = logging.getLogger(__name__)
+
+ACTOR = "harvestapi~linkedin-post-search"
+APIFY_BASE = "https://api.apify.com/v2"
+
+# L'actor rifiuta liste più lunghe: non è un parametro nostro, è il suo limite.
+PROFILI_PER_CHIAMATA = 10
+
+# Gli stati della pipeline in cui una persona è ancora viva: su «Chiuso» non si
+# commenta più niente.
+STATI_VIVI = ("Da valutare", "Richiesta Inviata", "Messaggio Inviato")
+
+# Un post più vecchio di così è acqua passata: commentarlo fa l'effetto opposto.
+GIORNI_UTILI = 14
+
+# Sotto questa lunghezza non c'è niente da commentare («Esemplare», un'immagine
+# senza testo, un link secco).
+TESTO_MINIMO = 150
+
+MAX_COMMENTO = 400  # battute: oltre, su LinkedIn, nessuno legge
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  Scarico
+# ──────────────────────────────────────────────────────────────────────────
+
+def profili_da_seguire(limite: int = None) -> list:
+    """I candidati vivi con un indirizzo LinkedIn utilizzabile.
+
+    I profili salvati come identificativo interno (/in/ACwA…) vengono esclusi:
+    è la forma che restituisce lo scraper dei profili, e la ricerca dei post
+    non la accetta. Fingere di poterli seguire produrrebbe solo ricerche a vuoto
+    pagate.
+    """
+    db = get_db()
+    try:
+        segnaposto = ",".join("?" for _ in STATI_VIVI)
+        sql = (f"SELECT id, nome, cognome, azienda, ruolo_attuale, profilo_linkedin, punteggio "
+               f"FROM candidati WHERE stato IN ({segnaposto}) "
+               f"AND profilo_linkedin IS NOT NULL AND TRIM(profilo_linkedin) <> '' "
+               f"AND profilo_linkedin NOT LIKE ? ORDER BY punteggio DESC NULLS LAST")
+        righe = db.execute(sql, (*STATI_VIVI, "%/in/ACwA%")).fetchall()
+        fuori = [dict(r) for r in righe]
+        return fuori[:limite] if limite else fuori
+    finally:
+        db.close()
+
+
+def _chiama_apify(urls: list, giorni: int) -> list:
+    token = os.getenv("APIFY_API_KEY")
+    if not token:
+        raise RuntimeError("Manca APIFY_API_KEY: senza chiave non si può scaricare niente.")
+
+    limite = "24h" if giorni <= 1 else ("week" if giorni <= 7 else "month")
+    payload = {
+        "authorUrls": urls,
+        "postedLimit": limite,
+        "maxPosts": 40,
+        "sortBy": "date",
+        "profileScraperMode": "short",
+    }
+    req = urllib.request.Request(
+        f"{APIFY_BASE}/acts/{ACTOR}/run-sync-get-dataset-items?token={token}",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=300) as r:
+        return json.loads(r.read())
+
+
+def _quando(grezzo) -> datetime:
+    """La data del post. L'actor la restituisce come timestamp in millisecondi
+    dentro un oggetto, oppure come stringa: si accettano entrambe."""
+    if isinstance(grezzo, dict):
+        ts = grezzo.get("timestamp")
+        if ts:
+            try:
+                return datetime.fromtimestamp(int(ts) / 1000)
+            except (ValueError, OSError, TypeError):
+                return None
+        grezzo = grezzo.get("date") or grezzo.get("postedAt")
+    if isinstance(grezzo, str):
+        for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(grezzo[:26], fmt)
+            except ValueError:
+                continue
+    return None
+
+
+def _conta(post: dict, campo: str) -> int:
+    eng = post.get("engagement")
+    if isinstance(eng, dict):
+        for k in (campo, campo + "s", "num" + campo.capitalize()):
+            if isinstance(eng.get(k), int):
+                return eng[k]
+    v = post.get("num" + campo.capitalize())
+    return v if isinstance(v, int) else 0
+
+
+def _motivo_scarto(post: dict, testo: str, quando: datetime) -> str:
+    """Perché un post non merita un commento. Restituisce None se invece lo merita.
+
+    Tutti controlli deterministici: non serve un modello per sapere che una
+    pubblicità di una banca non è il posto dove Sabia deve farsi vedere.
+    """
+    autore = post.get("author") or {}
+    # Le pagine aziendali non hanno un identificativo personale: un commento
+    # sotto la pubblicità di una banca non parla a nessuno che vogliamo assumere.
+    if not autore.get("publicIdentifier"):
+        return "è una pagina aziendale, non una persona"
+    if post.get("repostedBy") or post.get("isRepost"):
+        return "è una condivisione, non un contenuto suo"
+    if len(testo) < TESTO_MINIMO:
+        return f"troppo corto ({len(testo)} battute): non c'è niente su cui dire qualcosa"
+    if quando and quando < datetime.now() - timedelta(days=GIORNI_UTILI):
+        return f"pubblicato più di {GIORNI_UTILI} giorni fa"
+    return None
+
+
+def _punteggio(reazioni: int, commenti: int) -> float:
+    """Quanto conviene commentare qui.
+
+    Il momento buono è quando il post ha già pubblico ma pochi commenti: si
+    viene letti e non si finisce in coda a venti risposte. Un post con molte
+    reazioni e zero commenti vale più di uno con poche reazioni e zero commenti,
+    ma i commenti già presenti pesano in negativo.
+    """
+    return round(reazioni / (1 + commenti * 3), 2)
+
+
+def scarica(giorni: int = 7, limite_profili: int = None) -> dict:
+    """Una passata completa: scarica, filtra, salva i post nuovi.
+
+    Restituisce il riepilogo di quello che è successo, compreso quanto è costato
+    in termini di risultati pagati — il dato che serve per decidere se la
+    frequenza è sostenibile.
+    """
+    profili = profili_da_seguire(limite_profili)
+    if not profili:
+        return {"ok": False, "errore": "Nessun profilo da seguire.", "nuovi": 0}
+
+    per_url = {(p["profilo_linkedin"] or "").rstrip("/").lower(): p for p in profili}
+    esito = {"ok": True, "profili": len(profili), "post_trovati": 0,
+             "nuovi": 0, "scartati": 0, "chiamate": 0, "errore": None}
+
+    db = get_db()
+    try:
+        for i in range(0, len(profili), PROFILI_PER_CHIAMATA):
+            lotto = [p["profilo_linkedin"] for p in profili[i:i + PROFILI_PER_CHIAMATA]]
+            esito["chiamate"] += 1
+            try:
+                risultati = _chiama_apify(lotto, giorni)
+            except Exception as e:
+                log.error("Scarico post: lotto %s fallito: %s", i // PROFILI_PER_CHIAMATA, e)
+                esito["errore"] = str(e)
+                continue
+
+            esito["post_trovati"] += len(risultati)
+            for p in risultati:
+                try:
+                    if _salva(db, p, per_url, esito):
+                        esito["nuovi"] += 1
+                except Exception as e:
+                    log.warning("Post non salvato: %s", e)
+        db.commit()
+    finally:
+        db.close()
+    return esito
+
+
+def _salva(db, p: dict, per_url: dict, esito: dict) -> bool:
+    """Scrive un post se non c'è già. Restituisce True se è nuovo e utile."""
+    urn = p.get("id") or p.get("entityId") or p.get("shareUrn")
+    if not urn:
+        return False
+    if db.execute("SELECT 1 FROM linkedin_post WHERE urn = ?", (urn,)).fetchone():
+        return False
+
+    autore = p.get("author") or {}
+    testo = (p.get("content") or p.get("text") or "").strip()
+    quando = _quando(p.get("postedAt") or p.get("postedDate"))
+    motivo = _motivo_scarto(p, testo, quando)
+
+    # Si risale al candidato dall'indirizzo dell'autore: è quello che permette
+    # di mostrare a Sabia con chi sta parlando, non solo che cosa ha scritto.
+    url_autore = (autore.get("linkedinUrl") or "").rstrip("/").lower()
+    cand = per_url.get(url_autore)
+    if not cand and autore.get("publicIdentifier"):
+        atteso = f"https://www.linkedin.com/in/{autore['publicIdentifier']}".lower()
+        cand = per_url.get(atteso)
+
+    reazioni, commenti = _conta(p, "like"), _conta(p, "comment")
+    db.execute(
+        "INSERT INTO linkedin_post (urn, candidato_id, autore_nome, autore_url, testo, url,"
+        " pubblicato_il, reazioni, commenti, scartato, motivo_scarto, punteggio)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (urn, cand["id"] if cand else None,
+         autore.get("name") or f"{autore.get('firstName','')} {autore.get('lastName','')}".strip(),
+         autore.get("linkedinUrl"), testo, p.get("linkedinUrl") or p.get("url"),
+         quando, reazioni, commenti, bool(motivo), motivo,
+         _punteggio(reazioni, commenti)))
+
+    if motivo:
+        esito["scartati"] += 1
+        return False
+    return True
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  La proposta di commento
+# ──────────────────────────────────────────────────────────────────────────
+
+# Frasi che non devono finire sotto il post di un consulente: promettono o
+# reclutano in modo esplicito, e lì dentro bruciano la credibilità di chi scrive.
+_VIETATE = re.compile(
+    r"\b(ti (va|andrebbe)|parliamone in privato|ti scrivo in privato|mandami il (cv|curriculum)"
+    r"|opportunit[àa] di lavoro|stiamo assumendo|cerchiamo (consulenti|figure|profili)"
+    r"|entra (in|nel) (team|squadra)|unisciti a)\b", re.I)
+
+# Un commento che cita cifre che nessuno ha verificato è il modo più rapido di
+# farsi correggere in pubblico.
+_CIFRE = re.compile(r"\b\d+([.,]\d+)?\s*(%|per cento|milioni|miliardi|mila)\b", re.I)
+
+
+def _contesto(post: dict) -> str:
+    """Le istruzioni per chi scrive il commento.
+
+    Tutto quello che serve sta qui dentro: chi parla, a chi, che cosa ha
+    scritto l'altro e cosa non si deve dire. Il modello non deve indovinare
+    niente sul contesto.
+    """
+    chi = post.get("autore_nome") or "un consulente"
+    dove = post.get("azienda") or ""
+    ruolo = post.get("ruolo_attuale") or ""
+    identita = ", ".join(x for x in (ruolo, dove) if x)
+
+    return f"""Scrivi un commento da pubblicare sotto un post di LinkedIn.
+
+CHI COMMENTA
+Salvatore Sabia, consulente finanziario di Banca Fideuram a Roma. Guida una
+squadra e ne sta cercando altri come lui, ma qui non deve reclutare nessuno:
+deve solo dire una cosa sensata, da collega a collega.
+
+SOTTO IL POST DI
+{chi}{(' — ' + identita) if identita else ''}
+
+IL POST DICE
+\"\"\"{(post.get('testo') or '')[:1200]}\"\"\"
+
+COSA DEVE FARE IL COMMENTO
+Aggiungere qualcosa: un'esperienza concreta di chi fa questo mestiere, un
+dettaglio che chi non è del settore non conosce, oppure una domanda vera —
+non retorica — su un punto preciso di quello che ha scritto.
+
+REGOLE
+- Da due a quattro frasi, mai più di {MAX_COMMENTO} battute.
+- Prima persona, tono di un collega che parla alla pari. Mai del lei.
+- Niente complimenti generici: «bel post», «ottima riflessione», «grazie per
+  la condivisione» e simili sono vietati.
+- Niente cifre, percentuali o dati: non ne abbiamo di verificati per questo post.
+- Non proporre lavoro, non invitare in privato, non nominare Fideuram.
+- Niente trattino lungo, niente emoji, niente hashtag.
+- Italiano parlato, non da comunicato.
+- Scrivi solo il commento, senza virgolette e senza spiegazioni."""
+
+
+def _controlla(testo: str) -> list:
+    """I guardrail sul testo generato. Restituisce l'elenco dei problemi."""
+    problemi = []
+    t = (testo or "").strip()
+    if not t:
+        return ["il testo è vuoto"]
+    if len(t) > MAX_COMMENTO:
+        problemi.append(f"troppo lungo: {len(t)} battute invece di {MAX_COMMENTO}")
+    if _VIETATE.search(t):
+        problemi.append("propone lavoro o sposta in privato: sotto un post pubblico non si fa")
+    if _CIFRE.search(t):
+        problemi.append("cita cifre che non abbiamo verificato")
+    if re.search(r"\b(bel post|ottim[ao] (post|riflessione|spunto)|grazie per (la|il)|"
+                 r"condivido in pieno|assolutamente d'accordo)\b", t, re.I):
+        problemi.append("è un complimento generico")
+    if "—" in t:
+        problemi.append("contiene il trattino lungo")
+    return problemi
+
+
+def _scrivi_con_argon(prompt: str):
+    """Il copywriter di Axiom se c'è, Claude come riserva dichiarata."""
+    percorso = os.path.expanduser("~/scripts/axiom")
+    if os.path.isdir(percorso):
+        if percorso not in sys.path:
+            sys.path.insert(0, percorso)
+        try:
+            from copywriter import scrivi
+            return scrivi(prompt, tipo="messaggio")
+        except Exception as e:
+            log.warning("Argon non disponibile (%s): scrive Claude", e)
+    from ai_helpers import client, CLAUDE_MODEL
+    r = client.messages.create(model=CLAUDE_MODEL, max_tokens=400,
+                               messages=[{"role": "user", "content": prompt}])
+    return r.content[0].text.strip(), "claude"
+
+
+def genera_proposta(urn: str, riprova: bool = True) -> dict:
+    """Scrive la proposta di commento per un post e la salva.
+
+    Se il testo non supera i controlli si riprova una volta sola, spiegando
+    l'errore a chi scrive. Al secondo fallimento la proposta viene salvata lo
+    stesso ma segnalata: meglio che Sabia veda un testo imperfetto e lo corregga,
+    piuttosto che la riga sparisca senza che nessuno sappia perché.
+    """
+    db = get_db()
+    try:
+        post = db.execute(
+            "SELECT p.*, c.azienda, c.ruolo_attuale FROM linkedin_post p"
+            " LEFT JOIN candidati c ON c.id = p.candidato_id WHERE p.urn = ?", (urn,)).fetchone()
+        if not post:
+            return {"ok": False, "errore": "Post non trovato."}
+        post = dict(post)
+
+        prompt = _contesto(post)
+        testo, autore = _scrivi_con_argon(prompt)
+        problemi = _controlla(testo)
+
+        if problemi and riprova:
+            log.info("Commento rifatto per %s: %s", urn, "; ".join(problemi))
+            testo, autore = _scrivi_con_argon(
+                prompt + "\n\nIL TENTATIVO PRECEDENTE È STATO SCARTATO PERCHÉ: "
+                + "; ".join(problemi) + ".\nRiscrivilo evitando quell'errore.")
+            problemi = _controlla(testo)
+
+        db.execute("DELETE FROM linkedin_commenti WHERE post_urn = ? AND stato = 'proposto'", (urn,))
+        db.execute("INSERT INTO linkedin_commenti (post_urn, testo_proposto, autore_testo, angolo)"
+                   " VALUES (?,?,?,?)",
+                   (urn, testo.strip(), autore,
+                    "; ".join(problemi) if problemi else None))
+        db.commit()
+        return {"ok": True, "testo": testo.strip(), "autore": autore, "problemi": problemi}
+    finally:
+        db.close()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  Quello che vede Sabia
+# ──────────────────────────────────────────────────────────────────────────
+
+def da_approvare(limite: int = 20) -> list:
+    """I post buoni, dal più conveniente, con la proposta se già c'è."""
+    db = get_db()
+    try:
+        righe = db.execute(
+            "SELECT p.urn, p.autore_nome, p.autore_url, p.testo, p.url, p.pubblicato_il,"
+            " p.reazioni, p.commenti, p.punteggio,"
+            " c.id AS candidato_id, c.nome, c.cognome, c.azienda, c.ruolo_attuale,"
+            " c.punteggio AS punteggio_candidato, c.stato,"
+            " k.id AS commento_id, k.testo_proposto, k.testo_finale, k.stato AS stato_commento,"
+            " k.autore_testo, k.angolo"
+            " FROM linkedin_post p"
+            " LEFT JOIN candidati c ON c.id = p.candidato_id"
+            " LEFT JOIN linkedin_commenti k ON k.post_urn = p.urn AND k.stato <> 'scartato'"
+            " WHERE p.scartato = FALSE"
+            "   AND (k.stato IS NULL OR k.stato IN ('proposto', 'approvato'))"
+            " ORDER BY (k.stato = 'approvato') DESC, p.punteggio DESC, p.pubblicato_il DESC"
+            " LIMIT ?", (limite,)).fetchall()
+        return [dict(r) for r in righe]
+    finally:
+        db.close()
+
+
+def decidi(commento_id: int, azione: str, testo: str = None) -> dict:
+    """Approva, scarta o segna come pubblicato una proposta.
+
+    Il testo che Sabia approva viene salvato a parte: la differenza con quello
+    proposto è l'unico materiale onesto per capire come correggere il modo di
+    scrivere.
+    """
+    if azione not in ("approva", "scarta", "pubblicato"):
+        return {"ok": False, "errore": "Azione non riconosciuta."}
+    nuovo = {"approva": "approvato", "scarta": "scartato", "pubblicato": "pubblicato"}[azione]
+
+    db = get_db()
+    try:
+        if azione == "pubblicato":
+            db.execute("UPDATE linkedin_commenti SET stato = ?, pubblicato_il = CURRENT_TIMESTAMP"
+                       " WHERE id = ?", (nuovo, commento_id))
+        else:
+            db.execute("UPDATE linkedin_commenti SET stato = ?, deciso_il = CURRENT_TIMESTAMP,"
+                       " testo_finale = COALESCE(?, testo_finale) WHERE id = ?",
+                       (nuovo, (testo or "").strip() or None, commento_id))
+        db.commit()
+        return {"ok": True, "stato": nuovo}
+    finally:
+        db.close()
+
+
+def riepilogo() -> dict:
+    """I numeri della sezione, compreso quanto spesso il testo proposto va bene
+    così com'è: è la misura che dice se stiamo imparando a scrivere come lui."""
+    db = get_db()
+    try:
+        def uno(sql, par=()):
+            r = db.execute(sql, par).fetchone()
+            return (r["n"] if r and r["n"] is not None else 0)
+
+        decisi = db.execute(
+            "SELECT testo_proposto, testo_finale FROM linkedin_commenti"
+            " WHERE stato IN ('approvato','pubblicato')").fetchall()
+        intatti = sum(1 for r in decisi
+                      if not r["testo_finale"]
+                      or r["testo_finale"].strip() == r["testo_proposto"].strip())
+
+        return {
+            "profili_seguiti": len(profili_da_seguire()),
+            "post_utili": uno("SELECT COUNT(*) n FROM linkedin_post WHERE scartato = FALSE"),
+            "post_scartati": uno("SELECT COUNT(*) n FROM linkedin_post WHERE scartato = TRUE"),
+            "da_decidere": uno("SELECT COUNT(*) n FROM linkedin_commenti WHERE stato = 'proposto'"),
+            "approvati": uno("SELECT COUNT(*) n FROM linkedin_commenti WHERE stato = 'approvato'"),
+            "pubblicati": uno("SELECT COUNT(*) n FROM linkedin_commenti WHERE stato = 'pubblicato'"),
+            "decisi": len(decisi),
+            "intatti": intatti,
+            "quota_intatti": round(intatti / len(decisi) * 100) if decisi else None,
+        }
+    finally:
+        db.close()

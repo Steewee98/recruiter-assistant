@@ -71,6 +71,12 @@
             <span class="nav-icon">&#9998;</span>
             <span>Contenuti LinkedIn</span>
         </a>
+
+        <a href="{{ url_for('commenti.index') }}"
+           class="nav-item {% if request.blueprint == 'commenti' %}active{% endif %}">
+            <span class="nav-icon">&#128172;</span>
+            <span class="nav-text">Commenti</span>
+        </a>
         <a href="{{ url_for('impostazioni.index') }}"
            class="nav-item {% if request.blueprint == 'impostazioni' %}active{% endif %}">
             <span class="nav-icon">&#9881;</span>
