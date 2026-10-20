@@ -89,6 +89,30 @@ def home():
     return redirect(url_for("dashboard.index"))
 
 
+# Avviato all'importazione del modulo: è il momento in cui Railway ha caricato
+# questa versione del codice.
+_AVVIATO_IL = time.strftime("%d/%m/%Y %H:%M:%S")
+
+
+@app.route("/versione")
+def versione():
+    """Quale versione del programma sta girando, e da quando.
+
+    Non chiede il login apposta: serve proprio quando si guarda una pagina e si
+    ha il dubbio che il server stia ancora servendo il codice di prima. Non
+    espone niente di riservato — solo il numero della revisione e l'ora di avvio.
+    """
+    commit = (os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+              or os.environ.get("SOURCE_VERSION") or "")
+    return jsonify({
+        "revisione": commit[:8] or "sconosciuta",
+        "messaggio": os.environ.get("RAILWAY_GIT_COMMIT_MESSAGE", "")[:120],
+        "avviato_il": _AVVIATO_IL,
+        "sezioni": sorted({r.endpoint.split(".")[0] for r in app.url_map.iter_rules()
+                           if "." in r.endpoint}),
+    })
+
+
 # Inizializza il database all'avvio dell'app
 with app.app_context():
     try:
