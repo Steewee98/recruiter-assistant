@@ -59,6 +59,70 @@
 
 </div>
 
+<!-- Commenti pronti: in cima, perché è la cosa da fare appena si entra -->
+<div class="card dash-commenti">
+  <div class="card-header">
+    <span>Da commentare questa settimana</span>
+    <a href="{{ url_for('commenti.index') }}" class="btn btn-sm">Tutti i post</a>
+  </div>
+  {% if da_commentare %}
+  <p class="bc-intro">
+    Post pubblicati negli ultimi sette giorni da persone che stiamo seguendo,
+    con il commento già scritto. Leggi, correggi se serve, approva.
+  </p>
+  <ul class="bc-lista">
+    {% for p in da_commentare %}
+    <li class="bc-riga" id="bc-{{ p.commento_id }}">
+      <div class="bc-testa">
+        <div class="bc-foto">
+          {% if p.autore_foto %}
+          <img src="{{ p.autore_foto }}" alt=""
+               onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
+          <div class="bc-iniziali" style="display:none;">{{ (p.nome or p.autore_nome or '?')[:1] }}{{ (p.cognome or ' ')[:1] }}</div>
+          {% else %}
+          <div class="bc-iniziali">{{ (p.nome or p.autore_nome or '?')[:1] }}{{ (p.cognome or ' ')[:1] }}</div>
+          {% endif %}
+        </div>
+        <div class="bc-chi">
+          <span class="bc-nome">{{ p.autore_nome or ((p.nome or '') ~ ' ' ~ (p.cognome or '')) }}</span>
+          <span class="bc-ruolo">{{ p.azienda or p.ruolo_attuale or '' }}</span>
+        </div>
+        {% if p.punteggio_candidato %}
+        <a class="bc-voto {% if p.punteggio_candidato >= 8 %}bc-voto--alto{% endif %}"
+           href="{{ url_for('pipeline.index') }}?report={{ p.candidato_id }}"
+           title="Punteggio del report">{{ p.punteggio_candidato }}</a>
+        {% endif %}
+      </div>
+
+      <div class="bc-post">{{ (p.testo or '')[:230] }}{% if (p.testo or '')|length > 230 %}…{% endif %}</div>
+      {% if p.url %}<a class="bc-link" href="{{ p.url }}" target="_blank" rel="noopener">vedi il post</a>{% endif %}
+
+      <textarea class="bc-area" id="bc-testo-{{ p.commento_id }}"
+                maxlength="300">{{ p.testo_finale or p.testo_proposto }}</textarea>
+      <div class="bc-azioni">
+        {% if p.stato_commento == 'approvato' %}
+        <span class="bc-ok">Approvato</span>
+        <button class="btn btn-sm" onclick="bcCopia({{ p.commento_id }})">Copia</button>
+        <button class="btn btn-sm btn-primary" onclick="bcDecidi({{ p.commento_id }}, 'pubblicato')">L'ho pubblicato</button>
+        {% else %}
+        <button class="btn btn-sm btn-primary" onclick="bcDecidi({{ p.commento_id }}, 'approva')">Approva</button>
+        <button class="btn btn-sm" onclick="bcDecidi({{ p.commento_id }}, 'scarta')">Lascia perdere</button>
+        {% endif %}
+        <span class="bc-stato" id="bc-stato-{{ p.commento_id }}"></span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="dash-empty">
+    Nessun commento pronto. I post si cercano dalla
+    <a href="{{ url_for('commenti.index') }}">sezione Commenti</a>.
+  </p>
+  {% endif %}
+</div>
+
+
+
 <!-- ════════════════════════════════════════════════════════
      PANNELLO CANDIDATI PER STATO (espandibile)
 ════════════════════════════════════════════════════════ -->
@@ -911,4 +975,89 @@ function apriReportDashboard(candidatoId) {
 .candidato-linkedin:hover { text-decoration: underline; }
 </style>
 
+
+<style>
+.dash-commenti .card-header { align-items: center; }
+.bc-intro { font-size: 0.82rem; color: var(--grigio-testo); line-height: 1.5;
+            margin: 0 0 0.9rem; }
+.bc-lista { list-style: none; margin: 0; padding: 0; display: flex;
+            flex-direction: column; gap: 0.9rem; }
+.bc-riga { border: 1px solid #E4EAF4; border-radius: 12px; padding: 0.85rem 0.95rem;
+           transition: opacity .25s; }
+.bc-testa { display: grid; grid-template-columns: 38px 1fr auto; gap: 0.6rem;
+            align-items: center; margin-bottom: 0.6rem; }
+.bc-foto { width: 38px; height: 38px; border-radius: 50%; overflow: hidden; background: #EDF2FA; }
+.bc-foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bc-iniziali { width: 100%; height: 100%; display: grid; place-items: center;
+               font-weight: 700; font-size: 0.78rem; color: #4A6FA8; background: #E8F1FF; }
+.bc-chi { min-width: 0; }
+.bc-nome { display: block; font-size: 0.88rem; font-weight: 700; color: var(--blu-scuro);
+           line-height: 1.25; }
+.bc-ruolo { display: block; font-size: 0.75rem; color: var(--grigio-testo);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc-voto { font-size: 0.82rem; font-weight: 700; color: #1D5BD6; background: #F3F7FD;
+           border: 1px solid #DDE8F7; border-radius: 8px; padding: 0.15rem 0.45rem;
+           text-decoration: none; }
+.bc-voto--alto { color: #1B7A46; background: #ECF9F1; border-color: #BFE3CE; }
+.bc-post { font-size: 0.8rem; line-height: 1.55; color: #5A6B8C; background: #F7F9FD;
+           border-radius: 8px; padding: 0.55rem 0.7rem; white-space: pre-line; }
+.bc-link { display: inline-block; font-size: 0.74rem; color: var(--azzurro);
+           text-decoration: none; margin: 0.35rem 0 0.1rem; }
+.bc-link:hover { text-decoration: underline; }
+.bc-area { width: 100%; min-height: 66px; border: 1px solid #DCE5F2; border-radius: 9px;
+           padding: 0.5rem 0.65rem; font-family: inherit; font-size: 0.84rem;
+           line-height: 1.55; color: var(--blu-scuro); resize: vertical; margin-top: 0.5rem; }
+.bc-area:focus { outline: none; border-color: var(--azzurro); box-shadow: 0 0 0 3px #E8F1FF; }
+.bc-azioni { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
+             margin-top: 0.45rem; }
+.bc-ok { font-size: 0.74rem; font-weight: 700; color: #1B7A46; background: #ECF9F1;
+         border-radius: 6px; padding: 0.15rem 0.4rem; }
+.bc-stato { font-size: 0.74rem; color: var(--grigio-testo); }
+.bc-stato.male { color: #B4471F; }
+</style>
+
+<script>
+// Le stesse rotte della sezione Commenti: qui cambia solo quanto si vede.
+async function bcDecidi(id, azione) {
+    const area = document.getElementById('bc-testo-' + id);
+    const nota = document.getElementById('bc-stato-' + id);
+    if (nota) { nota.textContent = 'Salvo…'; nota.classList.remove('male'); }
+    let d;
+    try {
+        const r = await fetch('/commenti/decidi', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: id, azione: azione, testo: area ? area.value : null})
+        });
+        d = await r.json();
+    } catch (e) {
+        d = {ok: false, errore: 'Connessione non riuscita'};
+    }
+    if (!d.ok) {
+        if (nota) { nota.textContent = d.errore || 'Non salvato'; nota.classList.add('male'); }
+        return;
+    }
+    const riga = document.getElementById('bc-' + id);
+    if (azione === 'approva') {
+        if (nota) nota.textContent = 'Approvato: copialo e incollalo sotto il post';
+        const azioni = riga ? riga.querySelector('.bc-azioni') : null;
+        if (azioni) azioni.innerHTML =
+            '<span class="bc-ok">Approvato</span>' +
+            '<button class="btn btn-sm" onclick="bcCopia(' + id + ')">Copia</button>' +
+            '<button class="btn btn-sm btn-primary" onclick="bcDecidi(' + id + ', \'pubblicato\')">L\'ho pubblicato</button>' +
+            '<span class="bc-stato" id="bc-stato-' + id + '"></span>';
+        return;
+    }
+    // Scartato o pubblicato: la riga esce dalla bacheca.
+    if (riga) { riga.style.opacity = '0'; setTimeout(() => riga.remove(), 260); }
+}
+
+function bcCopia(id) {
+    const a = document.getElementById('bc-testo-' + id);
+    const nota = document.getElementById('bc-stato-' + id);
+    if (!a) return;
+    navigator.clipboard.writeText(a.value.trim())
+        .then(() => { if (nota) nota.textContent = 'Copiato'; })
+        .catch(() => { if (nota) { nota.textContent = 'Copia non riuscita'; nota.classList.add('male'); } });
+}
+</script>
 {% endblock %}

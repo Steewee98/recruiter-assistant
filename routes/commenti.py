@@ -28,6 +28,11 @@ commenti_bp = Blueprint("commenti", __name__)
 _ricerca_lock = threading.Lock()
 _ricerca = {"in_corso": False, "esito": None}
 
+# Quante proposte si scrivono da sole dopo ogni ricerca. Dieci sono quelle che
+# la bacheca mostra: scriverne di più vorrebbe dire pagare il modello per testi
+# che nessuno leggerà.
+PROPOSTE_IN_ANTICIPO = 10
+
 
 def _corpo():
     """Il corpo della richiesta, sempre come dizionario.
@@ -89,6 +94,18 @@ def scarica():
         except Exception as e:
             log.error("Scarico post fallito: %s", e, exc_info=True)
             esito = {"ok": False, "errore": str(e)}
+
+        # Subito dopo si scrivono le proposte per i post migliori, così in
+        # bacheca Sabia le trova già pronte. Se dovesse premere «scrivi» e
+        # aspettare un minuto per ognuna, non lo farebbe mai: il commento resta
+        # una cosa che si approva, non una che si avvia.
+        if esito.get("ok"):
+            try:
+                esito["proposte"] = cl.prepara_proposte(quanti=PROPOSTE_IN_ANTICIPO)
+            except Exception as e:
+                log.warning("Proposte non preparate: %s", e)
+                esito["proposte"] = {"ok": False, "errore": str(e)}
+
         with _ricerca_lock:
             _ricerca["esito"] = esito
             _ricerca["in_corso"] = False

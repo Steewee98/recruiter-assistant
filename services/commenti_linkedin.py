@@ -544,8 +544,13 @@ _FRESCHI = ("   AND COALESCE(p.pubblicato_il, p.visto_il) > ?"
             "   AND (c.id IS NULL OR c.stato <> 'Chiuso')")
 
 
-def da_approvare(limite: int = 20) -> list:
-    """I post buoni, dal più conveniente, con la proposta se già c'è."""
+def da_approvare(limite: int = 20, giorni: int = None, solo_con_proposta: bool = False) -> list:
+    """I post buoni, dal più conveniente, con la proposta se già c'è.
+
+    `giorni` stringe la finestra: in bacheca si mostrano solo i post dell'ultima
+    settimana, perché lì Sabia passa a confermare i profili e deve trovare cose
+    ancora fresche; nella sezione dedicata la finestra è più larga.
+    """
     db = get_db()
     try:
         righe = db.execute(
@@ -562,16 +567,39 @@ def da_approvare(limite: int = 20) -> list:
             "   AND (k.stato IS NULL OR k.stato IN ('proposto', 'approvato'))"
             # Un post invecchia anche dopo essere entrato in lista, e la persona
             # può essere stata chiusa nel frattempo: vedi _FRESCHI.
-            + _FRESCHI +
+            + _FRESCHI
+            + ("   AND k.testo_proposto IS NOT NULL" if solo_con_proposta else "")
             # In PostgreSQL DESC mette i NULL per primi: senza COALESCE i post
             # senza proposta scavalcherebbero quelli già approvati, che con più
             # di venti righe finirebbero fuori dalla pagina.
-            " ORDER BY COALESCE(k.stato = 'approvato', FALSE) DESC,"
-            "          p.punteggio DESC, p.pubblicato_il DESC NULLS LAST"
-            " LIMIT ?", (datetime.now() - timedelta(days=GIORNI_UTILI), limite)).fetchall()
+            + " ORDER BY COALESCE(k.stato = 'approvato', FALSE) DESC,"
+              "          p.punteggio DESC, p.pubblicato_il DESC NULLS LAST"
+              " LIMIT ?",
+            (datetime.now() - timedelta(days=giorni or GIORNI_UTILI), limite)).fetchall()
         return [dict(r) for r in righe]
     finally:
         db.close()
+
+
+def prepara_proposte(quanti: int = 10, giorni: int = None) -> dict:
+    """Scrive in anticipo le proposte che mancano, dai post più promettenti.
+
+    Serve perché Sabia in bacheca deve trovare i commenti già pronti: se dovesse
+    premere «scrivi» e aspettare un minuto per ciascuno, non lo farebbe mai.
+    Gira dopo lo scarico, in un thread, e costa una chiamata al modello per post.
+    """
+    senza = [p for p in da_approvare(quanti * 2, giorni) if not p.get("commento_id")]
+    fatti, falliti = 0, 0
+    for p in senza[:quanti]:
+        try:
+            if genera_proposta(p["urn"]).get("ok"):
+                fatti += 1
+            else:
+                falliti += 1
+        except Exception as e:
+            falliti += 1
+            log.warning("Proposta non scritta per %s: %s", p["urn"], e)
+    return {"ok": True, "scritte": fatti, "fallite": falliti, "mancavano": len(senza)}
 
 
 def decidi(commento_id: int, azione: str, testo: str = None) -> dict:

@@ -392,10 +392,14 @@ function seguiRicerca() {
         if (!e.ok) { stato(e.errore || 'Ricerca non riuscita', true); return; }
         let msg = e.nuovi + ' post nuovi · ' + e.post_trovati + ' trovati in tutto · '
                   + e.scartati + ' messi da parte';
+        if (e.proposte && e.proposte.scritte) msg += ' · ' + e.proposte.scritte + ' commenti già scritti';
         if (e.parziale) msg += ' · attenzione: ' + e.lotti_falliti + ' ricerche non riuscite';
         stato(msg, !!e.parziale);
-        // Qui il reload ci vuole: i post nuovi non ci sono proprio nella pagina.
-        if (e.nuovi > 0) setTimeout(() => location.reload(), 1800);
+        // Qui il reload ci vuole: i post nuovi, e i commenti scritti nel
+        // frattempo, non ci sono proprio nella pagina.
+        if (e.nuovi > 0 || (e.proposte && e.proposte.scritte)) {
+            setTimeout(() => location.reload(), 1800);
+        }
     }, 5000);
 }
 
