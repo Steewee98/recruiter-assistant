@@ -129,9 +129,26 @@ def _quando(grezzo) -> datetime:
                 return None
         grezzo = grezzo.get("date") or grezzo.get("postedAt")
     if isinstance(grezzo, str):
-        for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        testo = grezzo.strip()
+        # fromisoformat non digerisce la «Z»: la si traduce nel fuso che indica.
+        # Prima si tagliava la stringa a 26 caratteri, ma su una data con sei
+        # decimali quel taglio mangiava proprio la Z e la data diventava
+        # illeggibile: il post restava senza data e scavalcava il controllo
+        # sull'anzianità invece di essere scartato.
+        if testo.endswith("Z"):
+            testo = testo[:-1] + "+00:00"
+        try:
+            d = datetime.fromisoformat(testo)
+            # Le date si confrontano con datetime.now(), che non porta fuso:
+            # si riporta tutto all'ora locale e si toglie l'informazione.
+            return d.astimezone().replace(tzinfo=None) if d.tzinfo else d
+        except ValueError:
+            pass
+        for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z",
+                    "%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y"):
             try:
-                return datetime.strptime(grezzo[:26], fmt)
+                d = datetime.strptime(testo, fmt)
+                return d.astimezone().replace(tzinfo=None) if d.tzinfo else d
             except ValueError:
                 continue
     return None
@@ -191,7 +208,8 @@ def scarica(giorni: int = 7, limite_profili: int = None) -> dict:
 
     per_url = {(p["profilo_linkedin"] or "").rstrip("/").lower(): p for p in profili}
     esito = {"ok": True, "profili": len(profili), "post_trovati": 0,
-             "nuovi": 0, "scartati": 0, "falliti": 0, "chiamate": 0, "errore": None}
+             "nuovi": 0, "scartati": 0, "falliti": 0, "chiamate": 0,
+             "lotti_riusciti": 0, "lotti_falliti": 0, "errore": None}
 
     db = get_db()
     try:
@@ -202,8 +220,10 @@ def scarica(giorni: int = 7, limite_profili: int = None) -> dict:
                 risultati = _chiama_apify(lotto, giorni)
             except Exception as e:
                 log.error("Scarico post: lotto %s fallito: %s", i // PROFILI_PER_CHIAMATA, e)
+                esito["lotti_falliti"] += 1
                 esito["errore"] = str(e)
                 continue
+            esito["lotti_riusciti"] += 1
 
             esito["post_trovati"] += len(risultati)
             for p in risultati:
@@ -225,6 +245,17 @@ def scarica(giorni: int = 7, limite_profili: int = None) -> dict:
         db.commit()
     finally:
         db.close()
+
+    # Una ricerca in cui nessuna chiamata è andata a buon fine non è una ricerca
+    # senza risultati: è una ricerca fallita. Dire «0 post nuovi» nasconderebbe
+    # una chiave scaduta o lo scraper giù, e si continuerebbe a premere il
+    # pulsante credendo che non ci sia niente da commentare.
+    if esito["lotti_riusciti"] == 0:
+        esito["ok"] = False
+        esito["errore"] = ("Nessuna delle %d ricerche è andata a buon fine. %s"
+                           % (esito["chiamate"], esito["errore"] or ""))
+    elif esito["lotti_falliti"]:
+        esito["parziale"] = True
     return esito
 
 
@@ -294,7 +325,12 @@ _VIETATE = re.compile(
 
 # Un commento che cita cifre che nessuno ha verificato è il modo più rapido di
 # farsi correggere in pubblico.
-_CIFRE = re.compile(r"\b\d+([.,]\d+)?\s*(%|per cento|milioni|miliardi|mila)\b", re.I)
+# Il confine di parola dopo «%» pretendeva una lettera subito dopo, quindi
+# «rende il 10% annuo» e «siamo al 10%.» passavano indisturbati — cioè proprio
+# la forma in cui un consulente promette un rendimento.
+_CIFRE = re.compile(
+    r"\b\d+([.,]\d+)?\s*(%|percento|per cento|punti base"
+    r"|milion[ei]|miliard[oi]|mila|euro|€)(?![a-z])", re.I)
 
 # Riempitivi: occupano battute senza dire niente, e si sentono subito.
 _RIEMPITIVI = re.compile(
@@ -442,12 +478,15 @@ def genera_proposta(urn: str, riprova: bool = True) -> dict:
             problemi = _controlla(testo)
 
         db.execute("DELETE FROM linkedin_commenti WHERE post_urn = ? AND stato = 'proposto'", (urn,))
-        db.execute("INSERT INTO linkedin_commenti (post_urn, testo_proposto, autore_testo, angolo)"
-                   " VALUES (?,?,?,?)",
-                   (urn, testo.strip(), autore,
-                    "; ".join(problemi) if problemi else None))
+        cur = db.execute(
+            "INSERT INTO linkedin_commenti (post_urn, testo_proposto, autore_testo, angolo)"
+            " VALUES (?,?,?,?)",
+            (urn, testo.strip(), autore, "; ".join(problemi) if problemi else None))
         db.commit()
-        return {"ok": True, "testo": testo.strip(), "autore": autore, "problemi": problemi}
+        # L'identificativo serve alla pagina per disegnare la proposta al posto
+        # giusto senza ricaricare tutto.
+        return {"ok": True, "testo": testo.strip(), "autore": autore,
+                "problemi": problemi, "commento_id": cur.lastrowid, "urn": urn}
     finally:
         db.close()
 
@@ -505,6 +544,14 @@ def decidi(commento_id: int, azione: str, testo: str = None) -> dict:
     nuovo = {"approva": "approvato", "scarta": "scartato", "pubblicato": "pubblicato"}[azione]
 
     pulito = (testo or "").strip() or None
+
+    # Se il campo è stato svuotato di proposito, COALESCE terrebbe buono il testo
+    # di prima e si approverebbe qualcosa che Sabia ha cancellato. Meglio
+    # fermarsi: un commento vuoto non si pubblica, e la cancellazione è un modo
+    # di dire «questo non va», non «va bene così».
+    if azione == "approva" and testo is not None and not pulito:
+        return {"ok": False,
+                "errore": "Il commento è vuoto: scrivi il testo o usa «Lascia perdere»."}
 
     db = get_db()
     try:

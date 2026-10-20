@@ -21,14 +21,14 @@
 
 <div class="p-kpi">
     <div class="p-tessera p-tessera--accento">
-        <div class="numero">{{ riepilogo.da_decidere }}</div>
+        <div class="numero" id="kpi-decidere">{{ riepilogo.da_decidere }}</div>
         <div class="didascalia">
             da leggere e approvare
             {%- if riepilogo.senza_proposta %}<br><span style="font-size:0.72rem;">({{ riepilogo.senza_proposta }} ancora senza proposta)</span>{% endif %}
         </div>
     </div>
     <div class="p-tessera">
-        <div class="numero">{{ riepilogo.approvati }}</div>
+        <div class="numero" id="kpi-approvati">{{ riepilogo.approvati }}</div>
         <div class="didascalia">approvati, da pubblicare</div>
     </div>
     <div class="p-tessera">
@@ -75,7 +75,7 @@
     {% for p in post %}
     {% set rateo = (p.reazioni / p.commenti)|round(0, 'floor')|int if p.commenti else p.reazioni %}
     <article class="f-post {% if p.stato_commento == 'approvato' %}f-post--pronto{% endif %}"
-             data-urn="{{ p.urn }}">
+             id="scheda-{{ loop.index }}" data-urn="{{ p.urn }}">
 
         <!-- ───── chi ha scritto ───── -->
         <header class="f-testa">
@@ -140,7 +140,7 @@
                 <div class="f-iniziali f-iniziali--mia">SS</div>
             </div>
 
-            <div class="f-nuvola">
+            <div class="f-nuvola" id="nuvola-{{ loop.index }}">
                 <div class="f-nuvola-testa">
                     <span>Salvatore Sabia</span>
                     {% if p.autore_testo %}<em>proposta scritta da {{ p.autore_testo }}</em>{% endif %}
@@ -154,13 +154,14 @@
                               oninput="conta({{ p.commento_id }})">{{ p.testo_finale or p.testo_proposto }}</textarea>
                     <div class="f-sotto">
                         <span class="f-conta" id="conta-{{ p.commento_id }}"></span>
-                        <div class="f-bottoni">
+                        <div class="f-bottoni" id="bottoni-{{ p.commento_id }}">
                             {% if p.stato_commento == 'approvato' %}
                                 <button class="btn btn-secondary btn-sm" onclick="copia({{ p.commento_id }})">Copia</button>
                                 <button class="btn btn-primary btn-sm" onclick="decidi({{ p.commento_id }}, 'pubblicato')">L'ho pubblicato</button>
                             {% else %}
                                 <button class="btn btn-primary btn-sm" onclick="decidi({{ p.commento_id }}, 'approva')">Approva</button>
-                                <button class="btn btn-secondary btn-sm" onclick="genera('{{ p.urn }}', this)">Riscrivilo</button>
+                                <button class="btn btn-secondary btn-sm"
+                                        onclick="genera('{{ p.urn }}', this, {{ loop.index }})">Riscrivilo</button>
                             {% endif %}
                             <button class="btn btn-secondary btn-sm" onclick="decidi({{ p.commento_id }}, 'scarta')">Lascia perdere</button>
                         </div>
@@ -168,7 +169,8 @@
                 {% else %}
                     <div class="f-vuoto">
                         <span>Nessuna proposta ancora.</span>
-                        <button class="btn btn-primary btn-sm" onclick="genera('{{ p.urn }}', this)">Scrivi il commento</button>
+                        <button class="btn btn-primary btn-sm"
+                                onclick="genera('{{ p.urn }}', this, {{ loop.index }})">Scrivi il commento</button>
                     </div>
                 {% endif %}
             </div>
@@ -294,15 +296,44 @@ function stato(msg, errore) {
 }
 
 async function chiama(url, corpo) {
-    const r = await fetch(url, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(corpo || {})
-    });
-    let d = {};
-    try { d = await r.json(); } catch (e) { d = {ok: false, errore: 'Risposta non leggibile'}; }
-    if (!r.ok && !d.errore) d.errore = 'Errore ' + r.status;
-    return d;
+    // Un errore di rete qui tornava indietro come eccezione e lasciava il
+    // pulsante bloccato su «Sto scrivendo…» per sempre: si cattura e si
+    // restituisce un esito come tutti gli altri.
+    try {
+        const r = await fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(corpo || {})
+        });
+        let d = {};
+        try { d = await r.json(); } catch (e) { d = {ok: false, errore: 'Risposta non leggibile'}; }
+        if (!r.ok && !d.errore) d.errore = 'Errore ' + r.status;
+        return d;
+    } catch (e) {
+        return {ok: false, errore: 'Connessione non riuscita: ' + (e.message || e)};
+    }
+}
+
+// Si aggiornano solo i numeri in alto: ricaricare la pagina cancellerebbe le
+// correzioni iniziate sugli altri commenti e ancora non salvate.
+async function aggiornaNumeri() {
+    try {
+        const d = await (await fetch('/commenti/dati')).json();
+        if (!d.ok) return;
+        const a = document.getElementById('kpi-decidere');
+        const b = document.getElementById('kpi-approvati');
+        if (a) a.textContent = d.riepilogo.da_decidere;
+        if (b) b.textContent = d.riepilogo.approvati;
+    } catch (e) { /* i numeri si risistemano al prossimo caricamento */ }
+}
+
+function togliScheda(elemento, messaggio) {
+    const s = elemento.closest('.f-post');
+    if (!s) return;
+    s.style.transition = 'opacity .25s';
+    s.style.opacity = '0';
+    setTimeout(() => { s.remove(); aggiornaNumeri(); }, 260);
+    if (messaggio) stato(messaggio);
 }
 
 // La ricerca dura minuti: si avvia e poi si chiede ogni cinque secondi a che
@@ -321,12 +352,23 @@ async function cercaPost() {
 function seguiRicerca() {
     clearInterval(_attesa);
     let passati = 0;
+    let muti = 0;
     _attesa = setInterval(async () => {
         passati += 5;
         let d;
         try {
             d = await (await fetch('/commenti/stato-ricerca')).json();
-        } catch (e) { return; }
+            muti = 0;
+        } catch (e) {
+            // Se il server non risponde per un minuto si smette di chiedere,
+            // altrimenti il pulsante resterebbe spento senza spiegazione.
+            if (++muti >= 12) {
+                clearInterval(_attesa);
+                document.getElementById('btn-cerca').disabled = false;
+                stato('Non riesco a sapere a che punto è la ricerca: ricarica la pagina', true);
+            }
+            return;
+        }
         if (d.in_corso) {
             stato('Sto guardando cosa hanno pubblicato… (' + passati + 's)');
             return;
@@ -335,33 +377,92 @@ function seguiRicerca() {
         document.getElementById('btn-cerca').disabled = false;
         const e = d.esito || {};
         if (!e.ok) { stato(e.errore || 'Ricerca non riuscita', true); return; }
-        stato(e.nuovi + ' post nuovi · ' + e.post_trovati + ' trovati in tutto · '
-              + e.scartati + ' messi da parte');
-        if (e.nuovi > 0) setTimeout(() => location.reload(), 1500);
+        let msg = e.nuovi + ' post nuovi · ' + e.post_trovati + ' trovati in tutto · '
+                  + e.scartati + ' messi da parte';
+        if (e.parziale) msg += ' · attenzione: ' + e.lotti_falliti + ' ricerche non riuscite';
+        stato(msg, !!e.parziale);
+        // Qui il reload ci vuole: i post nuovi non ci sono proprio nella pagina.
+        if (e.nuovi > 0) setTimeout(() => location.reload(), 1800);
     }, 5000);
 }
 
-// Se si ricarica la pagina mentre una ricerca è in corso, si continua a seguirla.
-fetch('/commenti/stato-ricerca').then(r => r.json()).then(d => {
-    if (d.in_corso) { document.getElementById('btn-cerca').disabled = true; seguiRicerca(); }
-}).catch(() => {});
-
-async function genera(urn, bottone) {
+async function genera(urn, bottone, indice) {
     const vecchio = bottone.textContent;
     bottone.disabled = true;
     bottone.textContent = 'Sto scrivendo…';
-    const d = await chiama('/commenti/genera', {urn: urn});
-    bottone.disabled = false;
-    bottone.textContent = vecchio;
+    let d;
+    try {
+        d = await chiama('/commenti/genera', {urn: urn});
+    } finally {
+        bottone.disabled = false;
+        bottone.textContent = vecchio;
+    }
     if (!d.ok) { stato(d.errore || 'Non sono riuscito a scrivere il commento', true); return; }
-    location.reload();
+
+    const area = document.getElementById('testo-' + d.commento_id);
+    if (area) {
+        // C'era già una proposta: si sostituisce il testo e basta.
+        area.value = d.testo;
+        conta(d.commento_id);
+    } else {
+        disegnaProposta(indice, d);
+    }
+    stato(d.problemi && d.problemi.length
+          ? 'Riscritto, ma controllalo: ' + d.problemi.join('; ')
+          : 'Proposta pronta');
+    aggiornaNumeri();
+}
+
+// Il primo commento di un post: la nuvola era vuota e va riempita. Si ricostruisce
+// qui invece di ricaricare, perché un reload perderebbe le correzioni avviate
+// sulle altre schede.
+function disegnaProposta(indice, d) {
+    const nuvola = document.getElementById('nuvola-' + indice);
+    if (!nuvola || !d.commento_id) { location.reload(); return; }
+    const id = d.commento_id;
+    const avviso = (d.problemi && d.problemi.length)
+        ? '<span class="p-pillola p-pillola--ambra" title="' + d.problemi.join('; ').replace(/"/g, '&quot;') + '">da ricontrollare</span>'
+        : '';
+    nuvola.innerHTML =
+        '<div class="f-nuvola-testa"><span>Salvatore Sabia</span>' +
+        (d.autore ? '<em>proposta scritta da ' + d.autore + '</em>' : '') + avviso + '</div>' +
+        '<textarea class="f-area" id="testo-' + id + '" maxlength="300" oninput="conta(' + id + ')"></textarea>' +
+        '<div class="f-sotto"><span class="f-conta" id="conta-' + id + '"></span>' +
+        '<div class="f-bottoni" id="bottoni-' + id + '">' +
+        '<button class="btn btn-primary btn-sm" onclick="decidi(' + id + ', \'approva\')">Approva</button>' +
+        '<button class="btn btn-secondary btn-sm" onclick="genera(\'' + d.urn + '\', this, ' + indice + ')">Riscrivilo</button>' +
+        '<button class="btn btn-secondary btn-sm" onclick="decidi(' + id + ', \'scarta\')">Lascia perdere</button>' +
+        '</div></div>';
+    document.getElementById('testo-' + id).value = d.testo || '';
+    conta(id);
 }
 
 async function decidi(id, azione) {
-    const a = document.getElementById('testo-' + id);
-    const d = await chiama('/commenti/decidi', {id: id, azione: azione, testo: a ? a.value : null});
+    const area = document.getElementById('testo-' + id);
+    const d = await chiama('/commenti/decidi',
+                           {id: id, azione: azione, testo: area ? area.value : null});
     if (!d.ok) { stato(d.errore || 'Non sono riuscito a salvare', true); return; }
-    location.reload();
+
+    if (azione === 'scarta') {
+        togliScheda(area || document.getElementById('bottoni-' + id), 'Post lasciato perdere');
+        return;
+    }
+    if (azione === 'pubblicato') {
+        togliScheda(area, 'Segnato come pubblicato');
+        return;
+    }
+    // Approvato: la scheda resta, cambiano i pulsanti e il colore del bordo.
+    const scheda = area ? area.closest('.f-post') : null;
+    if (scheda) scheda.classList.add('f-post--pronto');
+    const bottoni = document.getElementById('bottoni-' + id);
+    if (bottoni) {
+        bottoni.innerHTML =
+            '<button class="btn btn-secondary btn-sm" onclick="copia(' + id + ')">Copia</button>' +
+            '<button class="btn btn-primary btn-sm" onclick="decidi(' + id + ', \'pubblicato\')">L\'ho pubblicato</button>' +
+            '<button class="btn btn-secondary btn-sm" onclick="decidi(' + id + ', \'scarta\')">Lascia perdere</button>';
+    }
+    stato('Approvato: copialo e incollalo sotto il post');
+    aggiornaNumeri();
 }
 
 function copia(id) {
@@ -371,5 +472,17 @@ function copia(id) {
         .then(() => stato('Testo copiato: incollalo sotto il post'))
         .catch(() => stato('Copia non riuscita, selezionalo a mano', true));
 }
+
+// Se si ricarica la pagina mentre una ricerca è in corso, si continua a seguirla.
+fetch('/commenti/stato-ricerca').then(r => r.json()).then(d => {
+    if (d.in_corso) { document.getElementById('btn-cerca').disabled = true; seguiRicerca(); }
+}).catch(() => {});
+
+// Un avviso prima di perdere correzioni non ancora approvate.
+window.addEventListener('beforeunload', (e) => {
+    const sporche = [...document.querySelectorAll('.f-area')]
+        .some(a => a.value.trim() !== (a.defaultValue || '').trim());
+    if (sporche) { e.preventDefault(); e.returnValue = ''; }
+});
 </script>
 {% endblock %}
