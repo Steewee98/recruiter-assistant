@@ -275,6 +275,10 @@
 .f-bottoni { display: flex; gap: 0.35rem; flex-wrap: wrap; }
 .f-vuoto { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem;
            font-size: 0.84rem; color: var(--grigio-testo); flex-wrap: wrap; }
+.f-avviso { margin-top: 0.55rem; font-size: 0.8rem; line-height: 1.45; color: #5A6B8C;
+            background: #FFFFFF; border: 1px solid #DCE5F2; border-radius: 8px;
+            padding: 0.45rem 0.6rem; }
+.f-avviso--male { color: #B4471F; background: #FBF4F2; border-color: #EBD6CE; }
 .f-nota { font-size: 0.82rem; color: var(--grigio-testo); text-align: center;
           margin-top: 1.2rem; line-height: 1.55; }
 .btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
@@ -395,18 +399,49 @@ function seguiRicerca() {
     }, 5000);
 }
 
+// Il messaggio in cima alla pagina non si vede, se si sta guardando una scheda
+// a metà schermo: ogni avviso compare dentro la nuvola su cui si è premuto.
+function avviso(nuvola, testo, errore) {
+    if (!nuvola) return;
+    let r = nuvola.querySelector('.f-avviso');
+    if (!r) {
+        r = document.createElement('div');
+        r.className = 'f-avviso';
+        nuvola.appendChild(r);
+    }
+    r.textContent = testo || '';
+    r.style.display = testo ? 'block' : 'none';
+    r.classList.toggle('f-avviso--male', !!errore);
+}
+
 async function genera(urn, bottone, indice) {
+    const nuvola = bottone.closest('.f-nuvola');
     const vecchio = bottone.textContent;
     bottone.disabled = true;
     bottone.textContent = 'Sto scrivendo…';
+    // Argon ci mette anche un minuto: senza un conto alla rovescia sembra che
+    // il pulsante non abbia fatto niente, e si preme di nuovo.
+    let secondi = 0;
+    const tic = setInterval(() => {
+        secondi += 1;
+        avviso(nuvola, 'Sto scrivendo il commento… ' + secondi + 's (può volerci un minuto)');
+    }, 1000);
+    avviso(nuvola, 'Sto scrivendo il commento…');
+
     let d;
     try {
         d = await chiama('/commenti/genera', {urn: urn});
     } finally {
+        clearInterval(tic);
         bottone.disabled = false;
         bottone.textContent = vecchio;
     }
-    if (!d.ok) { stato(d.errore || 'Non sono riuscito a scrivere il commento', true); return; }
+    if (!d.ok) {
+        avviso(nuvola, d.errore || 'Non sono riuscito a scrivere il commento', true);
+        stato(d.errore || 'Non sono riuscito a scrivere il commento', true);
+        return;
+    }
+    avviso(nuvola, '');
 
     const area = document.getElementById('testo-' + d.commento_id);
     if (area) {
@@ -451,6 +486,8 @@ async function decidi(id, azione) {
     const d = await chiama('/commenti/decidi',
                            {id: id, azione: azione, testo: area ? area.value : null});
     if (!d.ok) {
+        avviso(area ? area.closest('.f-nuvola') : null,
+               d.errore || 'Non sono riuscito a salvare', true);
         stato(d.errore || 'Non sono riuscito a salvare', true);
         // La proposta è stata rifatta altrove: il testo scritto qui è l'unica
         // copia rimasta, quindi si tiene a portata di mano invece di perderlo.

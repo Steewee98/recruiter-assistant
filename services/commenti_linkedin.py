@@ -477,9 +477,13 @@ def _scrivi_con_argon(prompt: str):
             return scrivi(prompt, tipo="messaggio")
         except Exception as e:
             log.warning("Argon non disponibile (%s): scrive Claude", e)
-    from ai_helpers import client, CLAUDE_MODEL
-    r = client.messages.create(model=CLAUDE_MODEL, max_tokens=400,
-                               messages=[{"role": "user", "content": prompt}])
+    # Sul server il copywriter non è installato e si passa sempre di qui: il
+    # client si costruisce con get_client(), non è un oggetto già pronto nel
+    # modulo. Sbagliare questo nome voleva dire che in produzione la scrittura
+    # del commento falliva ogni volta.
+    from ai_helpers import get_client, CLAUDE_MODEL
+    r = get_client().messages.create(model=CLAUDE_MODEL, max_tokens=400,
+                                     messages=[{"role": "user", "content": prompt}])
     return r.content[0].text.strip(), "claude"
 
 
