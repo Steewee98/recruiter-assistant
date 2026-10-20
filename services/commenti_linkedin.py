@@ -60,7 +60,12 @@ GIORNI_UTILI = 14
 # senza testo, un link secco).
 TESTO_MINIMO = 150
 
-MAX_COMMENTO = 400  # battute: oltre, su LinkedIn, nessuno legge
+# Un commento che funziona sotto il post di un altro sta in una o due frasi.
+# Oltre, diventa un intervento: sposta l'attenzione dal post a chi commenta, ed è
+# il modo più rapido per sembrare uno che cerca visibilità invece di uno che ha
+# qualcosa da dire.
+MAX_COMMENTO = 220
+MAX_FRASI = 2
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -216,8 +221,6 @@ def _salva(db, p: dict, per_url: dict, esito: dict) -> bool:
     urn = p.get("id") or p.get("entityId") or p.get("shareUrn")
     if not urn:
         return False
-    if db.execute("SELECT 1 FROM linkedin_post WHERE urn = ?", (urn,)).fetchone():
-        return False
 
     autore = p.get("author") or {}
     testo = (p.get("content") or p.get("text") or "").strip()
@@ -233,13 +236,30 @@ def _salva(db, p: dict, per_url: dict, esito: dict) -> bool:
         cand = per_url.get(atteso)
 
     reazioni, commenti = _conta(p, "like"), _conta(p, "comment")
+    foto = autore.get("avatar")
+    if isinstance(foto, dict):
+        foto = foto.get("url")
+    elif isinstance(foto, list) and foto:
+        foto = (foto[0] or {}).get("url") if isinstance(foto[0], dict) else foto[0]
+    foto = foto if isinstance(foto, str) else None
+
+    # Un post già visto non si reinserisce, ma reazioni e commenti cambiano di
+    # ora in ora: si aggiornano, altrimenti il rateo che decide l'ordine resta
+    # fermo alla prima volta che l'abbiamo guardato.
+    if db.execute("SELECT 1 FROM linkedin_post WHERE urn = ?", (urn,)).fetchone():
+        db.execute("UPDATE linkedin_post SET reazioni = ?, commenti = ?, punteggio = ?,"
+                   " autore_foto = COALESCE(?, autore_foto) WHERE urn = ?",
+                   (reazioni, commenti, _punteggio(reazioni, commenti), foto, urn))
+        return False
+
     db.execute(
-        "INSERT INTO linkedin_post (urn, candidato_id, autore_nome, autore_url, testo, url,"
-        " pubblicato_il, reazioni, commenti, scartato, motivo_scarto, punteggio)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO linkedin_post (urn, candidato_id, autore_nome, autore_url, autore_foto,"
+        " testo, url, pubblicato_il, reazioni, commenti, scartato, motivo_scarto, punteggio)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (urn, cand["id"] if cand else None,
          autore.get("name") or f"{autore.get('firstName','')} {autore.get('lastName','')}".strip(),
-         autore.get("linkedinUrl"), testo, p.get("linkedinUrl") or p.get("url"),
+         autore.get("linkedinUrl"), foto,
+         testo, p.get("linkedinUrl") or p.get("url"),
          quando, reazioni, commenti, bool(motivo), motivo,
          _punteggio(reazioni, commenti)))
 
@@ -263,6 +283,26 @@ _VIETATE = re.compile(
 # Un commento che cita cifre che nessuno ha verificato è il modo più rapido di
 # farsi correggere in pubblico.
 _CIFRE = re.compile(r"\b\d+([.,]\d+)?\s*(%|per cento|milioni|miliardi|mila)\b", re.I)
+
+# Riempitivi: occupano battute senza dire niente, e si sentono subito.
+_RIEMPITIVI = re.compile(
+    r"\b(mi capita spesso|capita spesso di|nel nostro lavoro|nel mio lavoro|"
+    r"la verità è che|il punto è che|quello che conta (davvero|è)|"
+    r"spesso si dimentica|non tutti sanno che|in questi anni ho imparato|"
+    r"aggiungo (solo )?che|mi permetto di)\b", re.I)
+
+# Il gergo di LinkedIn: ogni parola di questa lista fa sembrare il commento
+# scritto da chiunque altro.
+_GERGO = re.compile(
+    r"\b(valore aggiunto|mindset|percorso di crescita|crescita personale|"
+    r"fare la differenza|mettersi in gioco|uscire dalla (propria )?comfort zone|"
+    r"sinergi[ae]|proattiv[oi]|visione d'insieme|punto di vista interessante|"
+    r"riflessione (importante|preziosa)|spunto (di riflessione|interessante))\b", re.I)
+
+# Le aperture retoriche costruite: «Chi pensa che…», «C'è chi crede…».
+# Suonano da articolo, non da collega che risponde.
+_APERTURA_RETORICA = re.compile(r"^\s*(chi (vede|pensa|crede|dice|immagina)|c'è chi|"
+                                r"spesso|troppo spesso|quante volte)\b", re.I)
 
 
 def _contesto(post: dict) -> str:
@@ -291,15 +331,23 @@ IL POST DICE
 \"\"\"{(post.get('testo') or '')[:1200]}\"\"\"
 
 COSA DEVE FARE IL COMMENTO
-Aggiungere qualcosa: un'esperienza concreta di chi fa questo mestiere, un
-dettaglio che chi non è del settore non conosce, oppure una domanda vera —
-non retorica — su un punto preciso di quello che ha scritto.
+Una cosa sola, scelta fra queste tre:
+  a) un dettaglio concreto del mestiere che conferma o complica quello che dice;
+  b) una domanda vera, non retorica, su un punto preciso del post;
+  c) un\'esperienza in prima persona, raccontata in una riga.
+Chi legge deve capire in due secondi che chi scrive fa questo lavoro davvero.
 
 REGOLE
-- Da due a quattro frasi, mai più di {MAX_COMMENTO} battute.
+- UNA frase, al massimo due. Mai più di {MAX_COMMENTO} battute in tutto:
+  è la regola più importante, un commento lungo non lo legge nessuno.
+- Si parte subito dalla cosa da dire. Niente preamboli, niente «chi pensa che…»,
+  niente «spesso si dimentica…».
 - Prima persona, tono di un collega che parla alla pari. Mai del lei.
 - Niente complimenti generici: «bel post», «ottima riflessione», «grazie per
   la condivisione» e simili sono vietati.
+- Niente riempitivi: «mi capita spesso», «nel nostro lavoro», «la verità è che».
+- Niente gergo da LinkedIn: «valore aggiunto», «mindset», «spunto di riflessione»,
+  «mettersi in gioco».
 - Niente cifre, percentuali o dati: non ne abbiamo di verificati per questo post.
 - Non proporre lavoro, non invitare in privato, non nominare Fideuram.
 - Niente trattino lungo, niente emoji, niente hashtag.
@@ -315,6 +363,15 @@ def _controlla(testo: str) -> list:
         return ["il testo è vuoto"]
     if len(t) > MAX_COMMENTO:
         problemi.append(f"troppo lungo: {len(t)} battute invece di {MAX_COMMENTO}")
+    frasi = [f for f in re.split(r"(?<=[.!?])\s+", t) if f.strip()]
+    if len(frasi) > MAX_FRASI:
+        problemi.append(f"{len(frasi)} frasi invece di {MAX_FRASI}")
+    if _RIEMPITIVI.search(t):
+        problemi.append("contiene un riempitivo che non dice niente")
+    if _GERGO.search(t):
+        problemi.append("usa il gergo di LinkedIn")
+    if _APERTURA_RETORICA.search(t):
+        problemi.append("apre con una costruzione retorica invece che con la cosa da dire")
     if _VIETATE.search(t):
         problemi.append("propone lavoro o sposta in privato: sotto un post pubblico non si fa")
     if _CIFRE.search(t):
@@ -392,7 +449,7 @@ def da_approvare(limite: int = 20) -> list:
     db = get_db()
     try:
         righe = db.execute(
-            "SELECT p.urn, p.autore_nome, p.autore_url, p.testo, p.url, p.pubblicato_il,"
+            "SELECT p.urn, p.autore_nome, p.autore_url, p.autore_foto, p.testo, p.url, p.pubblicato_il,"
             " p.reazioni, p.commenti, p.punteggio,"
             " c.id AS candidato_id, c.nome, c.cognome, c.azienda, c.ruolo_attuale,"
             " c.punteggio AS punteggio_candidato, c.stato,"
@@ -456,7 +513,17 @@ def riepilogo() -> dict:
             "profili_seguiti": len(profili_da_seguire()),
             "post_utili": uno("SELECT COUNT(*) n FROM linkedin_post WHERE scartato = FALSE"),
             "post_scartati": uno("SELECT COUNT(*) n FROM linkedin_post WHERE scartato = TRUE"),
-            "da_decidere": uno("SELECT COUNT(*) n FROM linkedin_commenti WHERE stato = 'proposto'"),
+            # Quanti post aspettano una decisione: sia quelli con una proposta già
+            # scritta, sia quelli ancora senza. Contare solo le proposte scritte
+            # direbbe «1 da leggere» con diciotto post fermi in lista.
+            "da_decidere": uno(
+                "SELECT COUNT(*) n FROM linkedin_post p"
+                " LEFT JOIN linkedin_commenti k ON k.post_urn = p.urn AND k.stato <> 'scartato'"
+                " WHERE p.scartato = FALSE AND (k.stato IS NULL OR k.stato = 'proposto')"),
+            "senza_proposta": uno(
+                "SELECT COUNT(*) n FROM linkedin_post p"
+                " LEFT JOIN linkedin_commenti k ON k.post_urn = p.urn AND k.stato <> 'scartato'"
+                " WHERE p.scartato = FALSE AND k.id IS NULL"),
             "approvati": uno("SELECT COUNT(*) n FROM linkedin_commenti WHERE stato = 'approvato'"),
             "pubblicati": uno("SELECT COUNT(*) n FROM linkedin_commenti WHERE stato = 'pubblicato'"),
             "decisi": len(decisi),

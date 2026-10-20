@@ -526,6 +526,7 @@ def init_db():
             candidato_id   INTEGER REFERENCES candidati(id) ON DELETE SET NULL,
             autore_nome    TEXT,
             autore_url     TEXT,
+            autore_foto    TEXT,
             testo          TEXT,
             url            TEXT,
             pubblicato_il  TIMESTAMP,
@@ -536,6 +537,7 @@ def init_db():
             punteggio      REAL DEFAULT 0,
             visto_il       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
+        "ALTER TABLE linkedin_post ADD COLUMN IF NOT EXISTS autore_foto TEXT",
         "CREATE INDEX IF NOT EXISTS idx_lpost_data   ON linkedin_post(pubblicato_il DESC)",
         "CREATE INDEX IF NOT EXISTS idx_lpost_scarto ON linkedin_post(scartato)",
         "CREATE INDEX IF NOT EXISTS idx_lpost_cand   ON linkedin_post(candidato_id)",

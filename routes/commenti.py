@@ -10,6 +10,7 @@ quindi non parte mai all'apertura della pagina ma solo su richiesta.
 """
 
 import logging
+import threading
 
 from flask import Blueprint, jsonify, render_template, request
 
@@ -19,6 +20,13 @@ from services import commenti_linkedin as cl
 log = logging.getLogger(__name__)
 
 commenti_bp = Blueprint("commenti", __name__)
+
+# Una passata su centotrenta profili sono quattordici chiamate allo scraper e
+# dura minuti: se la si facesse dentro la richiesta, il browser mollerebbe prima
+# della fine e il pulsante sembrerebbe rotto mentre il lavoro continua. Quindi
+# gira in un thread e la pagina chiede ogni tanto a che punto è.
+_ricerca_lock = threading.Lock()
+_ricerca = {"in_corso": False, "esito": None}
 
 
 @commenti_bp.route("/commenti")
@@ -39,18 +47,38 @@ def dati():
 @commenti_bp.route("/commenti/scarica", methods=["POST"])
 @login_required
 def scarica():
-    """Cerca i post nuovi. È l'unico punto in cui si spende."""
+    """Avvia la ricerca dei post nuovi. È l'unico punto in cui si spende."""
     corpo = request.get_json(silent=True) or {}
     try:
         giorni = int(corpo.get("giorni", 7))
     except (TypeError, ValueError):
         giorni = 7
-    try:
-        esito = cl.scarica(giorni=giorni)
-    except Exception as e:
-        log.error("Scarico post fallito: %s", e, exc_info=True)
-        return jsonify({"ok": False, "errore": str(e)}), 500
-    return jsonify(esito)
+
+    with _ricerca_lock:
+        if _ricerca["in_corso"]:
+            return jsonify({"ok": False, "errore": "C'è già una ricerca in corso."}), 409
+        _ricerca["in_corso"] = True
+        _ricerca["esito"] = None
+
+    def _lavora():
+        try:
+            esito = cl.scarica(giorni=giorni)
+        except Exception as e:
+            log.error("Scarico post fallito: %s", e, exc_info=True)
+            esito = {"ok": False, "errore": str(e)}
+        with _ricerca_lock:
+            _ricerca["esito"] = esito
+            _ricerca["in_corso"] = False
+
+    threading.Thread(target=_lavora, daemon=True).start()
+    return jsonify({"ok": True, "avviata": True})
+
+
+@commenti_bp.route("/commenti/stato-ricerca")
+@login_required
+def stato_ricerca():
+    with _ricerca_lock:
+        return jsonify({"in_corso": _ricerca["in_corso"], "esito": _ricerca["esito"]})
 
 
 @commenti_bp.route("/commenti/genera", methods=["POST"])

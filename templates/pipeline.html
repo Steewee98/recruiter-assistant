@@ -993,6 +993,17 @@ async function aggiornaStato(select) {
     } catch(e) { console.error('[pipeline] aggiornaStato:', e); }
 }
 
+// Arrivando da un'altra sezione con ?report=<id> si apre direttamente quel report:
+// serve alla pagina Commenti, dove Sabia vuole sapere chi è la persona senza
+// doverla ricercare a mano nella tabella.
+document.addEventListener('DOMContentLoaded', function() {
+    var id = parseInt(new URLSearchParams(location.search).get('report'), 10);
+    if (!id) return;
+    setTimeout(function() {
+        try { mostraReport(id); } catch (e) { console.warn('Report non apribile:', e); }
+    }, 300);
+});
+
 function mostraReport(id) {
     var c = candidatiData.find(function(x) { return x.id === id; });
     if (!c) return;

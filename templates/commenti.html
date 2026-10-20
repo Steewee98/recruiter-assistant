@@ -21,11 +21,14 @@
 
 <div class="p-kpi">
     <div class="p-tessera p-tessera--accento">
-        <div class="numero" id="kpi-decidere">{{ riepilogo.da_decidere }}</div>
-        <div class="didascalia">da leggere e approvare</div>
+        <div class="numero">{{ riepilogo.da_decidere }}</div>
+        <div class="didascalia">
+            da leggere e approvare
+            {%- if riepilogo.senza_proposta %}<br><span style="font-size:0.72rem;">({{ riepilogo.senza_proposta }} ancora senza proposta)</span>{% endif %}
+        </div>
     </div>
     <div class="p-tessera">
-        <div class="numero" id="kpi-approvati">{{ riepilogo.approvati }}</div>
+        <div class="numero">{{ riepilogo.approvati }}</div>
         <div class="didascalia">approvati, da pubblicare</div>
     </div>
     <div class="p-tessera">
@@ -46,160 +49,231 @@
     </div>
 </div>
 
-{% if riepilogo.decisi and riepilogo.decisi < 15 %}
-<div class="p-riquadro p-riquadro--ambra" style="margin-bottom:1.4rem;">
-    Le prime decine di commenti servono a capire come scrivi. Ogni correzione che fai
-    resta registrata: più ne correggi all'inizio, meno ce ne saranno dopo.
-</div>
-{% endif %}
+<div class="f-colonna">
 
-<div class="p-pannello p-pannello--rilievo">
-    <div class="p-pannello-testa">
-        <div>
-            <h2>Post su cui vale la pena commentare</h2>
-            <p class="p-sottotitolo">
-                In cima quelli con più pubblico e meno commenti: è lì che una risposta si legge.
-            </p>
-        </div>
-        <span class="p-pillola p-pillola--forte">{{ post|length }} in lista</span>
+    {% if riepilogo.decisi and riepilogo.decisi < 15 %}
+    <div class="p-riquadro p-riquadro--ambra" style="margin-bottom:1.2rem;">
+        Le prime decine di commenti servono a capire come scrivi. Ogni correzione che fai
+        resta registrata: più ne correggi all'inizio, meno ce ne saranno dopo.
     </div>
-    <div class="p-pannello-corpo" id="lista-post">
-        {% if not post %}
-        <div class="p-vuoto">
-            <p>Nessun post in lista.</p>
-            <p style="font-size:0.85rem;">
-                Premi «Cerca post nuovi» per guardare cosa hanno pubblicato
-                i {{ riepilogo.profili_seguiti }} profili che stiamo seguendo.
-            </p>
-        </div>
-        {% endif %}
-        {% for p in post %}
-        <article class="c-post {% if p.stato_commento == 'approvato' %}c-post--pronto{% endif %}"
-                 id="post-{{ loop.index }}" data-urn="{{ p.urn }}">
+    {% endif %}
 
-            <header class="c-chi">
-                <div class="p-iniziali">
+    {% if not post %}
+    <div class="p-pannello">
+        <div class="p-pannello-corpo">
+            <div class="p-vuoto">
+                <p>Nessun post in lista.</p>
+                <p style="font-size:0.85rem;">
+                    Premi «Cerca post nuovi» per guardare cosa hanno pubblicato
+                    i {{ riepilogo.profili_seguiti }} profili che stiamo seguendo.
+                </p>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% for p in post %}
+    {% set rateo = (p.reazioni / p.commenti)|round(0, 'floor')|int if p.commenti else p.reazioni %}
+    <article class="f-post {% if p.stato_commento == 'approvato' %}f-post--pronto{% endif %}"
+             data-urn="{{ p.urn }}">
+
+        <!-- ───── chi ha scritto ───── -->
+        <header class="f-testa">
+            <div class="f-foto">
+                {% if p.autore_foto %}
+                <img src="{{ p.autore_foto }}" alt=""
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
+                <div class="f-iniziali" style="display:none;">
                     {{ (p.nome or p.autore_nome or '?')[:1] }}{{ (p.cognome or ' ')[:1] }}
                 </div>
-                <div class="c-chi-testo">
-                    <strong>{{ p.autore_nome or ((p.nome or '') ~ ' ' ~ (p.cognome or '')) }}</strong>
-                    <span>
-                        {% if p.ruolo_attuale %}{{ p.ruolo_attuale }}{% endif %}
-                        {%- if p.azienda %} · {{ p.azienda }}{% endif %}
-                        {%- if not p.candidato_id %} · non è fra i candidati seguiti{% endif %}
-                    </span>
+                {% else %}
+                <div class="f-iniziali">
+                    {{ (p.nome or p.autore_nome or '?')[:1] }}{{ (p.cognome or ' ')[:1] }}
                 </div>
-                <div class="c-chi-tag">
-                    {% if p.stato %}<span class="p-pillola">{{ p.stato }}</span>{% endif %}
-                    {% if p.punteggio_candidato %}
-                    <span class="p-pillola p-pillola--forte">{{ p.punteggio_candidato }}/100</span>
-                    {% endif %}
-                </div>
-            </header>
+                {% endif %}
+            </div>
 
-            <div class="c-corpo">
-                <div class="c-colonna">
-                    <div class="c-etichetta">Il suo post</div>
-                    <div class="c-testo-post">{{ p.testo }}</div>
-                    <div class="c-meta">
-                        <span class="p-numerico">{{ p.reazioni }} reazioni</span>
-                        <span class="p-numerico">{{ p.commenti }} commenti</span>
-                        {% if p.pubblicato_il %}<span>{{ p.pubblicato_il.strftime('%d/%m') if p.pubblicato_il.strftime is defined else p.pubblicato_il }}</span>{% endif %}
-                        {% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener">apri su LinkedIn</a>{% endif %}
-                        {% if p.autore_url %}<a href="{{ p.autore_url }}" target="_blank" rel="noopener">profilo</a>{% endif %}
-                    </div>
-                </div>
-
-                <div class="c-colonna">
-                    <div class="c-etichetta">
-                        La proposta di commento
-                        {% if p.autore_testo %}
-                        <span class="c-firma">l'ha scritta {{ p.autore_testo }}</span>
-                        {% endif %}
-                    </div>
-
-                    {% if p.commento_id %}
-                        <textarea class="c-area" id="testo-{{ p.commento_id }}"
-                                  maxlength="400"
-                                  oninput="conta({{ p.commento_id }})">{{ p.testo_finale or p.testo_proposto }}</textarea>
-                        <div class="c-sotto">
-                            <span class="c-conta" id="conta-{{ p.commento_id }}"></span>
-                            {% if p.angolo %}
-                            <span class="p-pillola p-pillola--ambra" title="{{ p.angolo }}">da ricontrollare</span>
-                            {% endif %}
-                        </div>
-                        <div class="p-azioni">
-                            {% if p.stato_commento == 'approvato' %}
-                                <button class="btn btn-secondary btn-sm"
-                                        onclick="copia({{ p.commento_id }})">Copia il testo</button>
-                                <button class="btn btn-primary btn-sm"
-                                        onclick="decidi({{ p.commento_id }}, 'pubblicato')">L'ho pubblicato</button>
-                            {% else %}
-                                <button class="btn btn-primary btn-sm"
-                                        onclick="decidi({{ p.commento_id }}, 'approva')">Approva</button>
-                                <button class="btn btn-secondary btn-sm"
-                                        onclick="genera('{{ p.urn }}', this)">Riscrivilo</button>
-                            {% endif %}
-                            <button class="btn btn-secondary btn-sm"
-                                    onclick="decidi({{ p.commento_id }}, 'scarta')">Lascia perdere</button>
-                        </div>
+            <div class="f-chi">
+                <div class="f-nome">
+                    {% if p.autore_url %}
+                    <a href="{{ p.autore_url }}" target="_blank" rel="noopener">{{ p.autore_nome or ((p.nome or '') ~ ' ' ~ (p.cognome or '')) }}</a>
                     {% else %}
-                        <div class="c-vuoto-proposta">
-                            <p>Nessuna proposta ancora.</p>
-                            <button class="btn btn-primary btn-sm"
-                                    onclick="genera('{{ p.urn }}', this)">Scrivi il commento</button>
-                        </div>
+                    {{ p.autore_nome or ((p.nome or '') ~ ' ' ~ (p.cognome or '')) }}
                     {% endif %}
+                </div>
+                <div class="f-ruolo">
+                    {%- if p.ruolo_attuale %}{{ p.ruolo_attuale }}{% endif -%}
+                    {%- if p.azienda %} · {{ p.azienda }}{% endif -%}
+                    {%- if not p.candidato_id %}non è fra i candidati seguiti{% endif -%}
+                </div>
+                <div class="f-quando">
+                    {%- if p.pubblicato_il %}{{ p.pubblicato_il[:10] if p.pubblicato_il is string else p.pubblicato_il }} · {% endif -%}
+                    {% if p.stato %}{{ p.stato }}{% endif %}
                 </div>
             </div>
-        </article>
-        {% endfor %}
-    </div>
+
+            <div class="f-tag">
+                <span class="f-rateo" title="Reazioni per ogni commento già presente: più è alto, più c'è pubblico che legge e poca coda davanti a te.">
+                    <strong>{{ rateo }}</strong><span>rateo</span>
+                </span>
+                {% if p.candidato_id %}
+                <a class="f-report" href="{{ url_for('pipeline.index') }}?report={{ p.candidato_id }}"
+                   title="Apri il report del candidato">
+                    Report{% if p.punteggio_candidato %} · {{ p.punteggio_candidato }}{% endif %}
+                </a>
+                {% endif %}
+            </div>
+        </header>
+
+        <!-- ───── il post ───── -->
+        <div class="f-testo">{{ p.testo }}</div>
+
+        <div class="f-numeri">
+            <span>{{ p.reazioni }} reazioni</span>
+            <span>{{ p.commenti }} commenti</span>
+            {% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener">apri su LinkedIn</a>{% endif %}
+        </div>
+
+        <!-- ───── la nuvoletta con il commento ───── -->
+        <div class="f-risposta">
+            <div class="f-foto f-foto--mia">
+                <div class="f-iniziali f-iniziali--mia">SS</div>
+            </div>
+
+            <div class="f-nuvola">
+                <div class="f-nuvola-testa">
+                    <span>Salvatore Sabia</span>
+                    {% if p.autore_testo %}<em>proposta scritta da {{ p.autore_testo }}</em>{% endif %}
+                    {% if p.angolo %}
+                    <span class="p-pillola p-pillola--ambra" title="{{ p.angolo }}">da ricontrollare</span>
+                    {% endif %}
+                </div>
+
+                {% if p.commento_id %}
+                    <textarea class="f-area" id="testo-{{ p.commento_id }}" maxlength="300"
+                              oninput="conta({{ p.commento_id }})">{{ p.testo_finale or p.testo_proposto }}</textarea>
+                    <div class="f-sotto">
+                        <span class="f-conta" id="conta-{{ p.commento_id }}"></span>
+                        <div class="f-bottoni">
+                            {% if p.stato_commento == 'approvato' %}
+                                <button class="btn btn-secondary btn-sm" onclick="copia({{ p.commento_id }})">Copia</button>
+                                <button class="btn btn-primary btn-sm" onclick="decidi({{ p.commento_id }}, 'pubblicato')">L'ho pubblicato</button>
+                            {% else %}
+                                <button class="btn btn-primary btn-sm" onclick="decidi({{ p.commento_id }}, 'approva')">Approva</button>
+                                <button class="btn btn-secondary btn-sm" onclick="genera('{{ p.urn }}', this)">Riscrivilo</button>
+                            {% endif %}
+                            <button class="btn btn-secondary btn-sm" onclick="decidi({{ p.commento_id }}, 'scarta')">Lascia perdere</button>
+                        </div>
+                    </div>
+                {% else %}
+                    <div class="f-vuoto">
+                        <span>Nessuna proposta ancora.</span>
+                        <button class="btn btn-primary btn-sm" onclick="genera('{{ p.urn }}', this)">Scrivi il commento</button>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </article>
+    {% endfor %}
+
+    {% if riepilogo.post_scartati %}
+    <p class="f-nota">
+        Messi da parte {{ riepilogo.post_scartati }} post: pagine aziendali, condivisioni,
+        testi troppo corti per dire qualcosa, o roba vecchia di più di due settimane.
+    </p>
+    {% endif %}
+
 </div>
-
-{% if riepilogo.post_scartati %}
-<p class="p-testo" style="margin-top:1rem;">
-    Sono stati messi da parte {{ riepilogo.post_scartati }} post: pagine aziendali,
-    condivisioni, testi troppo corti per dire qualcosa, o roba vecchia di più di due settimane.
-</p>
-{% endif %}
-
 </div>
 
 <style>
-.c-post { border: 1px solid var(--p-bordo); border-radius: 16px; padding: 1.1rem 1.3rem 1.3rem;
-          margin-bottom: 1rem; background: var(--p-superficie); }
-.c-post--pronto { border-color: #BFE3CE; background: linear-gradient(180deg,#F4FBF7 0%,#FFFFFF 55%); }
-.c-chi { display: grid; grid-template-columns: 44px 1fr auto; gap: 0.85rem; align-items: center;
-         padding-bottom: 0.9rem; border-bottom: 1px solid var(--p-bordo); margin-bottom: 1rem; }
-.c-chi-testo strong { display: block; font-size: 0.97rem; color: var(--blu-scuro); }
-.c-chi-testo span { font-size: 0.82rem; color: var(--grigio-testo); }
-.c-chi-tag { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; }
-.c-corpo { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem; }
-@media (max-width: 1000px) { .c-corpo { grid-template-columns: 1fr; gap: 1.1rem; } }
-.c-etichetta { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
-               color: #9AA8C2; font-weight: 700; margin-bottom: 0.5rem;
-               display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
-.c-firma { text-transform: none; letter-spacing: 0; font-weight: 500; color: #B2BDD1; }
-.c-testo-post { font-size: 0.87rem; line-height: 1.6; color: #44536F; white-space: pre-line;
-                max-height: 200px; overflow-y: auto; background: #F7F9FD; border-radius: 10px;
-                padding: 0.8rem 0.95rem; }
-.c-meta { display: flex; gap: 0.9rem; flex-wrap: wrap; font-size: 0.78rem;
-          color: var(--grigio-testo); margin-top: 0.6rem; }
-.c-meta a { color: var(--azzurro); text-decoration: none; }
-.c-meta a:hover { text-decoration: underline; }
-.c-area { width: 100%; min-height: 148px; border: 1px solid var(--p-bordo); border-radius: 10px;
-          padding: 0.8rem 0.95rem; font-family: inherit; font-size: 0.89rem; line-height: 1.6;
-          color: var(--blu-scuro); resize: vertical; }
-.c-area:focus { outline: none; border-color: var(--azzurro); box-shadow: 0 0 0 3px #E8F1FF; }
-.c-sotto { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem;
-           margin: 0.45rem 0 0.75rem; }
-.c-conta { font-size: 0.76rem; color: var(--grigio-testo); font-variant-numeric: tabular-nums; }
-.c-conta.lungo { color: #B4471F; font-weight: 600; }
-.c-vuoto-proposta { border: 1px dashed var(--p-bordo); border-radius: 10px; padding: 1.4rem 1rem;
-                    text-align: center; color: var(--grigio-testo); font-size: 0.85rem; }
-.c-vuoto-proposta p { margin: 0 0 0.7rem; }
-.btn-sm { padding: 0.4rem 0.85rem; font-size: 0.82rem; }
+.f-colonna { max-width: 680px; margin: 0 auto; }
+
+.f-post { background: var(--p-superficie); border: 1px solid var(--p-bordo);
+          border-radius: 16px; padding: 1.1rem 1.3rem 1.2rem; margin-bottom: 1.1rem;
+          box-shadow: var(--p-ombra); }
+.f-post--pronto { border-color: #BFE3CE; box-shadow: 0 0 0 3px #EEF8F2; }
+
+/* chi ha scritto */
+.f-testa { display: grid; grid-template-columns: 52px 1fr auto; gap: 0.8rem;
+           align-items: start; margin-bottom: 0.85rem; }
+.f-foto { width: 52px; height: 52px; border-radius: 50%; overflow: hidden;
+          background: #EDF2FA; }
+.f-foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.f-iniziali { width: 100%; height: 100%; display: grid; place-items: center;
+              font-weight: 700; font-size: 1rem; color: #4A6FA8; background: #E8F1FF;
+              letter-spacing: 0.02em; }
+.f-chi { min-width: 0; padding-top: 0.1rem; }
+.f-nome { font-size: 0.97rem; font-weight: 700; color: var(--blu-scuro); line-height: 1.25; }
+.f-nome a { color: inherit; text-decoration: none; }
+.f-nome a:hover { color: var(--azzurro); text-decoration: underline; }
+.f-ruolo { font-size: 0.82rem; color: var(--grigio-testo); line-height: 1.35;
+           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.f-quando { font-size: 0.74rem; color: #9AA8C2; margin-top: 0.12rem; }
+
+.f-tag { display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; }
+.f-rateo { display: inline-flex; align-items: baseline; gap: 0.3rem; background: #F3F7FD;
+           border: 1px solid #DDE8F7; border-radius: 9px; padding: 0.2rem 0.5rem;
+           cursor: help; }
+.f-rateo strong { font-size: 0.95rem; font-weight: 700; color: #1D5BD6;
+                  font-variant-numeric: tabular-nums; }
+.f-rateo span { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.07em;
+                color: #8FA3C2; }
+.f-report { font-size: 0.74rem; font-weight: 600; color: var(--azzurro);
+            text-decoration: none; border: 1px solid #DDE8F7; border-radius: 8px;
+            padding: 0.2rem 0.5rem; white-space: nowrap; }
+.f-report:hover { background: #E8F1FF; }
+
+/* il post */
+.f-testo { font-size: 0.92rem; line-height: 1.62; color: #2F3E58; white-space: pre-line;
+           max-height: 260px; overflow-y: auto; }
+.f-numeri { display: flex; gap: 1rem; font-size: 0.78rem; color: var(--grigio-testo);
+            border-top: 1px solid var(--p-bordo); margin-top: 0.9rem; padding-top: 0.6rem; }
+.f-numeri a { color: var(--azzurro); text-decoration: none; margin-left: auto; }
+.f-numeri a:hover { text-decoration: underline; }
+
+/* la nuvoletta */
+.f-risposta { display: grid; grid-template-columns: 40px 1fr; gap: 0.65rem;
+              margin-top: 0.9rem; align-items: start; }
+.f-foto--mia { width: 40px; height: 40px; }
+.f-iniziali--mia { background: var(--blu-scuro); color: #FFFFFF; font-size: 0.82rem; }
+.f-nuvola { position: relative; background: #F4F7FC; border: 1px solid #E2EAF6;
+            border-radius: 4px 14px 14px 14px; padding: 0.75rem 0.9rem 0.85rem; }
+/* la coda del fumetto, puntata verso l'avatar */
+.f-nuvola::before { content: ""; position: absolute; left: -9px; top: 10px;
+                    width: 0; height: 0; border-style: solid;
+                    border-width: 0 10px 10px 0;
+                    border-color: transparent #E2EAF6 transparent transparent; }
+.f-nuvola::after  { content: ""; position: absolute; left: -7px; top: 11px;
+                    width: 0; height: 0; border-style: solid;
+                    border-width: 0 9px 9px 0;
+                    border-color: transparent #F4F7FC transparent transparent; }
+.f-nuvola-testa { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+                  font-size: 0.8rem; font-weight: 700; color: var(--blu-scuro);
+                  margin-bottom: 0.45rem; }
+.f-nuvola-testa em { font-style: normal; font-weight: 500; font-size: 0.72rem; color: #9AA8C2; }
+
+.f-area { width: 100%; min-height: 78px; border: 1px solid #DCE5F2; border-radius: 10px;
+          padding: 0.6rem 0.75rem; font-family: inherit; font-size: 0.89rem; line-height: 1.58;
+          color: var(--blu-scuro); resize: vertical; background: #FFFFFF; }
+.f-area:focus { outline: none; border-color: var(--azzurro); box-shadow: 0 0 0 3px #E8F1FF; }
+.f-sotto { display: flex; justify-content: space-between; align-items: center;
+           gap: 0.6rem; margin-top: 0.5rem; flex-wrap: wrap; }
+.f-conta { font-size: 0.74rem; color: var(--grigio-testo); font-variant-numeric: tabular-nums; }
+.f-conta.lungo { color: #B4471F; font-weight: 700; }
+.f-bottoni { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.f-vuoto { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem;
+           font-size: 0.84rem; color: var(--grigio-testo); flex-wrap: wrap; }
+.f-nota { font-size: 0.82rem; color: var(--grigio-testo); text-align: center;
+          margin-top: 1.2rem; line-height: 1.55; }
+.btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+
+@media (max-width: 720px) {
+    .f-testa { grid-template-columns: 44px 1fr; }
+    .f-tag { grid-column: 1 / -1; flex-direction: row; align-items: center;
+             justify-content: flex-start; margin-top: 0.3rem; }
+    .f-foto { width: 44px; height: 44px; }
+}
 </style>
 
 <script>
@@ -208,10 +282,10 @@ function conta(id) {
     const c = document.getElementById('conta-' + id);
     if (!a || !c) return;
     const n = a.value.trim().length;
-    c.textContent = n + ' battute';
-    c.classList.toggle('lungo', n > 400);
+    c.textContent = n + ' / 220 battute';
+    c.classList.toggle('lungo', n > 220);
 }
-document.querySelectorAll('.c-area').forEach(a => conta(a.id.replace('testo-', '')));
+document.querySelectorAll('.f-area').forEach(a => conta(a.id.replace('testo-', '')));
 
 function stato(msg, errore) {
     const s = document.getElementById('stato-ricerca');
@@ -231,17 +305,46 @@ async function chiama(url, corpo) {
     return d;
 }
 
+// La ricerca dura minuti: si avvia e poi si chiede ogni cinque secondi a che
+// punto è, invece di tenere aperta una richiesta che il browser chiuderebbe.
+let _attesa = null;
+
 async function cercaPost() {
     const b = document.getElementById('btn-cerca');
     b.disabled = true;
     stato('Sto guardando cosa hanno pubblicato…');
     const d = await chiama('/commenti/scarica', {giorni: 7});
-    b.disabled = false;
-    if (!d.ok) { stato(d.errore || 'Ricerca fallita', true); return; }
-    stato(d.nuovi + ' post nuovi da leggere · ' + d.post_trovati + ' trovati in tutto · '
-          + d.scartati + ' messi da parte');
-    if (d.nuovi > 0) setTimeout(() => location.reload(), 1200);
+    if (!d.ok) { b.disabled = false; stato(d.errore || 'Ricerca fallita', true); return; }
+    seguiRicerca();
 }
+
+function seguiRicerca() {
+    clearInterval(_attesa);
+    let passati = 0;
+    _attesa = setInterval(async () => {
+        passati += 5;
+        let d;
+        try {
+            d = await (await fetch('/commenti/stato-ricerca')).json();
+        } catch (e) { return; }
+        if (d.in_corso) {
+            stato('Sto guardando cosa hanno pubblicato… (' + passati + 's)');
+            return;
+        }
+        clearInterval(_attesa);
+        document.getElementById('btn-cerca').disabled = false;
+        const e = d.esito || {};
+        if (!e.ok) { stato(e.errore || 'Ricerca non riuscita', true); return; }
+        stato(e.nuovi + ' post nuovi · ' + e.post_trovati + ' trovati in tutto · '
+              + e.scartati + ' messi da parte');
+        if (e.nuovi > 0) setTimeout(() => location.reload(), 1500);
+    }, 5000);
+}
+
+// Se si ricarica la pagina mentre una ricerca è in corso, si continua a seguirla.
+fetch('/commenti/stato-ricerca').then(r => r.json()).then(d => {
+    if (d.in_corso) { document.getElementById('btn-cerca').disabled = true; seguiRicerca(); }
+}).catch(() => {});
 
 async function genera(urn, bottone) {
     const vecchio = bottone.textContent;
@@ -256,9 +359,7 @@ async function genera(urn, bottone) {
 
 async function decidi(id, azione) {
     const a = document.getElementById('testo-' + id);
-    const d = await chiama('/commenti/decidi', {
-        id: id, azione: azione, testo: a ? a.value : null
-    });
+    const d = await chiama('/commenti/decidi', {id: id, azione: azione, testo: a ? a.value : null});
     if (!d.ok) { stato(d.errore || 'Non sono riuscito a salvare', true); return; }
     location.reload();
 }
