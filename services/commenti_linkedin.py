@@ -354,6 +354,20 @@ _GERGO = re.compile(
     r"sinergi[ae]|proattiv[oi]|visione d'insieme|punto di vista interessante|"
     r"riflessione (importante|preziosa)|spunto (di riflessione|interessante))\b", re.I)
 
+# Il commento deve sempre rafforzare quello che l'altro ha scritto, mai metterlo
+# in discussione. Non è una questione di buone maniere: sotto il post di un
+# consulente che vogliamo reclutare, anche un dissenso garbato lo mette sulla
+# difensiva — e chi si difende non risponde a un messaggio tre giorni dopo.
+# Se il post dice una cosa su cui non si è d'accordo, non lo si commenta.
+_CONTRASTO = re.compile(
+    r"(\bnon (sono|mi trovo) d'accordo\b|\bdissent|\bmi permetto di (dissentire|obiettare)"
+    r"|\bin realt[àa]\b|\bal contrario\b|\binvece (è|e'|sarebbe)\b"
+    r"|\bper[òo]\b|\btuttavia\b|\bciononostante\b|\bnondimeno\b"
+    r"|\bnon (è|e') (vero|cos[ìi]|proprio|del tutto)\b|\bsbagli|\berrato\b"
+    r"|\bil problema (è|e')\b|\bil punto debole\b|\bnon condivido\b"
+    r"|\battenzione per[òo]\b|\bmi sembra (riduttivo|eccessivo|azzardato)\b"
+    r"|\bdipende\b|\bnon la vedo cos[ìi]\b)", re.I)
+
 # Le aperture retoriche costruite: «Chi pensa che…», «C'è chi crede…».
 # Suonano da articolo, non da collega che risponde.
 _APERTURA_RETORICA = re.compile(r"^\s*(chi (vede|pensa|crede|dice|immagina)|c'è chi|"
@@ -386,11 +400,21 @@ IL POST DICE
 \"\"\"{(post.get('testo') or '')[:1200]}\"\"\"
 
 COSA DEVE FARE IL COMMENTO
-Una cosa sola, scelta fra queste tre:
-  a) un dettaglio concreto del mestiere che conferma o complica quello che dice;
-  b) una domanda vera, non retorica, su un punto preciso del post;
-  c) un\'esperienza in prima persona, raccontata in una riga.
+Rafforzare quello che ha scritto, aggiungendoci qualcosa di suo. Una cosa sola,
+scelta fra queste tre:
+  a) un dettaglio concreto del mestiere che conferma quello che dice;
+  b) una domanda vera, non retorica, che allarga un punto preciso del post;
+  c) un\'esperienza in prima persona, raccontata in una riga, che va nella sua
+     stessa direzione.
 Chi legge deve capire in due secondi che chi scrive fa questo lavoro davvero.
+
+LA REGOLA CHE VIENE PRIMA DI TUTTE
+Il commento non deve MAI contraddire, correggere, ridimensionare o mettere in
+dubbio quello che l\'altro ha scritto. Niente «però», «in realtà», «dipende»,
+«il problema è che». Se c\'è un punto su cui non si è d\'accordo, lo si lascia
+stare e si commenta un altro aspetto del post. Chi viene contraddetto in
+pubblico si mette sulla difensiva, e a quel punto non risponderà a un messaggio
+privato tre giorni dopo: il commento avrà ottenuto l\'opposto di quello che serve.
 
 REGOLE
 - UNA frase, al massimo due. Mai più di {MAX_COMMENTO} battute in tutto:
@@ -427,6 +451,9 @@ def _controlla(testo: str) -> list:
         problemi.append("usa il gergo di LinkedIn")
     if _APERTURA_RETORICA.search(t):
         problemi.append("apre con una costruzione retorica invece che con la cosa da dire")
+    if _CONTRASTO.search(t):
+        problemi.append("contraddice o ridimensiona quello che ha scritto: il commento "
+                        "deve rafforzare, mai mettere in discussione")
     if _VIETATE.search(t):
         problemi.append("propone lavoro o sposta in privato: sotto un post pubblico non si fa")
     if _CIFRE.search(t):

@@ -73,7 +73,7 @@
     {% endif %}
 
     {% for p in post %}
-    {% set rateo = (p.reazioni / p.commenti)|round(0, 'floor')|int if p.commenti else p.reazioni %}
+
     <article class="f-post {% if p.stato_commento == 'approvato' %}f-post--pronto{% endif %}"
              id="scheda-{{ loop.index }}" data-urn="{{ p.urn }}">
 
@@ -113,14 +113,16 @@
             </div>
 
             <div class="f-tag">
-                <span class="f-rateo" title="Reazioni per ogni commento già presente: più è alto, più c'è pubblico che legge e poca coda davanti a te.">
-                    <strong>{{ rateo }}</strong><span>rateo</span>
-                </span>
+                {% if p.punteggio_candidato %}
+                <a class="f-rateo {% if p.punteggio_candidato >= 8 %}f-rateo--alto{% elif p.punteggio_candidato < 6 %}f-rateo--basso{% endif %}"
+                   href="{{ url_for('pipeline.index') }}?report={{ p.candidato_id }}"
+                   title="Punteggio del report. Apri per leggerlo.">
+                    <strong>{{ p.punteggio_candidato }}</strong><span>su 10</span>
+                </a>
+                {% endif %}
                 {% if p.candidato_id %}
                 <a class="f-report" href="{{ url_for('pipeline.index') }}?report={{ p.candidato_id }}"
-                   title="Apri il report del candidato">
-                    Report{% if p.punteggio_candidato %} · {{ p.punteggio_candidato }}{% endif %}
-                </a>
+                   title="Apri il report del candidato">Apri il report</a>
                 {% endif %}
             </div>
         </header>
@@ -215,12 +217,19 @@
 
 .f-tag { display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; }
 .f-rateo { display: inline-flex; align-items: baseline; gap: 0.3rem; background: #F3F7FD;
-           border: 1px solid #DDE8F7; border-radius: 9px; padding: 0.2rem 0.5rem;
-           cursor: help; }
-.f-rateo strong { font-size: 0.95rem; font-weight: 700; color: #1D5BD6;
-                  font-variant-numeric: tabular-nums; }
-.f-rateo span { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.07em;
+           border: 1px solid #DDE8F7; border-radius: 9px; padding: 0.22rem 0.55rem;
+           text-decoration: none; transition: background .15s, border-color .15s; }
+.f-rateo:hover { background: #E8F1FF; border-color: #BFD8F7; }
+.f-rateo strong { font-size: 1.05rem; font-weight: 700; color: #1D5BD6;
+                  font-variant-numeric: tabular-nums; line-height: 1; }
+.f-rateo span { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.07em;
                 color: #8FA3C2; }
+.f-rateo--alto { background: #ECF9F1; border-color: #BFE3CE; }
+.f-rateo--alto strong { color: #1B7A46; }
+.f-rateo--alto span { color: #7FB199; }
+.f-rateo--basso { background: #FBF4F2; border-color: #EBD6CE; }
+.f-rateo--basso strong { color: #B4471F; }
+.f-rateo--basso span { color: #C49480; }
 .f-report { font-size: 0.74rem; font-weight: 600; color: var(--azzurro);
             text-decoration: none; border: 1px solid #DDE8F7; border-radius: 8px;
             padding: 0.2rem 0.5rem; white-space: nowrap; }
