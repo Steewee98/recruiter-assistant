@@ -50,8 +50,10 @@ APIFY_BASE = "https://api.apify.com/v2"
 PROFILI_PER_CHIAMATA = 10
 
 # Gli stati della pipeline in cui una persona è ancora viva: su «Chiuso» non si
-# commenta più niente.
-STATI_VIVI = ("Da valutare", "Richiesta Inviata", "Messaggio Inviato")
+# commenta più niente. «Da contattare» è il valore predefinito della colonna,
+# quindi se lo prende chi viene inserito a mano: lasciarlo fuori escludeva
+# proprio i candidati aggiunti uno per uno, che sono i più curati.
+STATI_VIVI = ("Da contattare", "Da valutare", "Richiesta Inviata", "Messaggio Inviato")
 
 # Un post più vecchio di così è acqua passata: commentarlo fa l'effetto opposto.
 GIORNI_UTILI = 14
@@ -189,7 +191,7 @@ def scarica(giorni: int = 7, limite_profili: int = None) -> dict:
 
     per_url = {(p["profilo_linkedin"] or "").rstrip("/").lower(): p for p in profili}
     esito = {"ok": True, "profili": len(profili), "post_trovati": 0,
-             "nuovi": 0, "scartati": 0, "chiamate": 0, "errore": None}
+             "nuovi": 0, "scartati": 0, "falliti": 0, "chiamate": 0, "errore": None}
 
     db = get_db()
     try:
@@ -205,10 +207,20 @@ def scarica(giorni: int = 7, limite_profili: int = None) -> dict:
 
             esito["post_trovati"] += len(risultati)
             for p in risultati:
+                # In PostgreSQL un errore lascia la transazione abortita: senza
+                # un punto di ripristino, un post malformato farebbe fallire
+                # tutti quelli dopo e cancellerebbe quelli già scritti prima,
+                # che però risulterebbero contati come salvati.
+                db.execute("SAVEPOINT singolo_post")
                 try:
-                    if _salva(db, p, per_url, esito):
+                    nuovo = _salva(db, p, per_url, esito)
+                    db.execute("RELEASE SAVEPOINT singolo_post")
+                    if nuovo:
                         esito["nuovi"] += 1
                 except Exception as e:
+                    db.execute("ROLLBACK TO SAVEPOINT singolo_post")
+                    db.execute("RELEASE SAVEPOINT singolo_post")
+                    esito["falliti"] = esito.get("falliti", 0) + 1
                     log.warning("Post non salvato: %s", e)
         db.commit()
     finally:
@@ -444,6 +456,13 @@ def genera_proposta(urn: str, riprova: bool = True) -> dict:
 #  Quello che vede Sabia
 # ──────────────────────────────────────────────────────────────────────────
 
+# Le due condizioni che fanno decadere un post dalla lista, usate sia quando si
+# legge sia quando si conta: devono restare identiche, altrimenti il numero in
+# alto e le righe sotto raccontano due storie diverse.
+_FRESCHI = ("   AND (p.pubblicato_il IS NULL OR p.pubblicato_il > ?)"
+            "   AND (c.id IS NULL OR c.stato <> 'Chiuso')")
+
+
 def da_approvare(limite: int = 20) -> list:
     """I post buoni, dal più conveniente, con la proposta se già c'è."""
     db = get_db()
@@ -460,8 +479,15 @@ def da_approvare(limite: int = 20) -> list:
             " LEFT JOIN linkedin_commenti k ON k.post_urn = p.urn AND k.stato <> 'scartato'"
             " WHERE p.scartato = FALSE"
             "   AND (k.stato IS NULL OR k.stato IN ('proposto', 'approvato'))"
-            " ORDER BY (k.stato = 'approvato') DESC, p.punteggio DESC, p.pubblicato_il DESC"
-            " LIMIT ?", (limite,)).fetchall()
+            # Un post invecchia anche dopo essere entrato in lista, e la persona
+            # può essere stata chiusa nel frattempo: vedi _FRESCHI.
+            + _FRESCHI +
+            # In PostgreSQL DESC mette i NULL per primi: senza COALESCE i post
+            # senza proposta scavalcherebbero quelli già approvati, che con più
+            # di venti righe finirebbero fuori dalla pagina.
+            " ORDER BY COALESCE(k.stato = 'approvato', FALSE) DESC,"
+            "          p.punteggio DESC, p.pubblicato_il DESC NULLS LAST"
+            " LIMIT ?", (datetime.now() - timedelta(days=GIORNI_UTILI), limite)).fetchall()
         return [dict(r) for r in righe]
     finally:
         db.close()
@@ -478,15 +504,33 @@ def decidi(commento_id: int, azione: str, testo: str = None) -> dict:
         return {"ok": False, "errore": "Azione non riconosciuta."}
     nuovo = {"approva": "approvato", "scarta": "scartato", "pubblicato": "pubblicato"}[azione]
 
+    pulito = (testo or "").strip() or None
+
     db = get_db()
     try:
         if azione == "pubblicato":
-            db.execute("UPDATE linkedin_commenti SET stato = ?, pubblicato_il = CURRENT_TIMESTAMP"
-                       " WHERE id = ?", (nuovo, commento_id))
+            # Il testo resta modificabile anche dopo l'approvazione: va salvato
+            # quello davvero copiato, altrimenti in archivio resta una versione
+            # diversa da quella finita sotto il post — e la misura di quanto
+            # scriviamo bene si baserebbe su un testo mai pubblicato.
+            db.execute("UPDATE linkedin_commenti SET stato = ?, pubblicato_il = CURRENT_TIMESTAMP,"
+                       " testo_finale = COALESCE(?, testo_finale) WHERE id = ?",
+                       (nuovo, pulito, commento_id))
         else:
             db.execute("UPDATE linkedin_commenti SET stato = ?, deciso_il = CURRENT_TIMESTAMP,"
                        " testo_finale = COALESCE(?, testo_finale) WHERE id = ?",
-                       (nuovo, (testo or "").strip() or None, commento_id))
+                       (nuovo, pulito, commento_id))
+
+        if azione == "scarta":
+            # «Lascia perdere» vuol dire «su questo post non commento», non
+            # «riscrivimelo»: senza chiudere anche il post, il giro dopo
+            # tornerebbe in lista come se non avesse mai avuto una proposta.
+            riga = db.execute("SELECT post_urn FROM linkedin_commenti WHERE id = ?",
+                              (commento_id,)).fetchone()
+            if riga:
+                db.execute("UPDATE linkedin_post SET scartato = TRUE,"
+                           " motivo_scarto = COALESCE(motivo_scarto, ?) WHERE urn = ?",
+                           ("lasciato perdere a mano", riga["post_urn"]))
         db.commit()
         return {"ok": True, "stato": nuovo}
     finally:
@@ -498,6 +542,8 @@ def riepilogo() -> dict:
     così com'è: è la misura che dice se stiamo imparando a scrivere come lui."""
     db = get_db()
     try:
+        soglia = datetime.now() - timedelta(days=GIORNI_UTILI)
+
         def uno(sql, par=()):
             r = db.execute(sql, par).fetchone()
             return (r["n"] if r and r["n"] is not None else 0)
@@ -516,14 +562,21 @@ def riepilogo() -> dict:
             # Quanti post aspettano una decisione: sia quelli con una proposta già
             # scritta, sia quelli ancora senza. Contare solo le proposte scritte
             # direbbe «1 da leggere» con diciotto post fermi in lista.
+            # Gli stessi filtri della lista: un contatore che promette venti
+            # post da leggere mentre la pagina ne mostra tre è peggio di nessun
+            # contatore.
             "da_decidere": uno(
                 "SELECT COUNT(*) n FROM linkedin_post p"
+                " LEFT JOIN candidati c ON c.id = p.candidato_id"
                 " LEFT JOIN linkedin_commenti k ON k.post_urn = p.urn AND k.stato <> 'scartato'"
-                " WHERE p.scartato = FALSE AND (k.stato IS NULL OR k.stato = 'proposto')"),
+                " WHERE p.scartato = FALSE AND (k.stato IS NULL OR k.stato = 'proposto')"
+                + _FRESCHI, (soglia,)),
             "senza_proposta": uno(
                 "SELECT COUNT(*) n FROM linkedin_post p"
+                " LEFT JOIN candidati c ON c.id = p.candidato_id"
                 " LEFT JOIN linkedin_commenti k ON k.post_urn = p.urn AND k.stato <> 'scartato'"
-                " WHERE p.scartato = FALSE AND k.id IS NULL"),
+                " WHERE p.scartato = FALSE AND k.id IS NULL"
+                + _FRESCHI, (soglia,)),
             "approvati": uno("SELECT COUNT(*) n FROM linkedin_commenti WHERE stato = 'approvato'"),
             "pubblicati": uno("SELECT COUNT(*) n FROM linkedin_commenti WHERE stato = 'pubblicato'"),
             "decisi": len(decisi),
