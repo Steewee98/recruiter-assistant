@@ -441,7 +441,17 @@ async function decidi(id, azione) {
     const area = document.getElementById('testo-' + id);
     const d = await chiama('/commenti/decidi',
                            {id: id, azione: azione, testo: area ? area.value : null});
-    if (!d.ok) { stato(d.errore || 'Non sono riuscito a salvare', true); return; }
+    if (!d.ok) {
+        stato(d.errore || 'Non sono riuscito a salvare', true);
+        // La proposta è stata rifatta altrove: il testo scritto qui è l'unica
+        // copia rimasta, quindi si tiene a portata di mano invece di perderlo.
+        if (d.scomparso && area) {
+            area.style.borderColor = '#B4471F';
+            area.focus();
+            area.select();
+        }
+        return;
+    }
 
     if (azione === 'scarta') {
         togliScheda(area || document.getElementById('bottoni-' + id), 'Post lasciato perdere');

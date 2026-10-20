@@ -254,7 +254,14 @@ def scarica(giorni: int = 7, limite_profili: int = None) -> dict:
         esito["ok"] = False
         esito["errore"] = ("Nessuna delle %d ricerche è andata a buon fine. %s"
                            % (esito["chiamate"], esito["errore"] or ""))
-    elif esito["lotti_falliti"]:
+    elif esito["falliti"] and esito["falliti"] == esito["post_trovati"]:
+        # Lo scraper ha risposto, ma nessuno dei post è finito in archivio:
+        # senza dirlo, la pagina mostrerebbe «0 post nuovi» come se semplicemente
+        # non avessero pubblicato niente.
+        esito["ok"] = False
+        esito["errore"] = ("Trovati %d post ma nessuno è stato salvato: "
+                           "c'è un problema nell'archivio." % esito["post_trovati"])
+    elif esito["lotti_falliti"] or esito["falliti"]:
         esito["parziale"] = True
     return esito
 
@@ -498,7 +505,11 @@ def genera_proposta(urn: str, riprova: bool = True) -> dict:
 # Le due condizioni che fanno decadere un post dalla lista, usate sia quando si
 # legge sia quando si conta: devono restare identiche, altrimenti il numero in
 # alto e le righe sotto raccontano due storie diverse.
-_FRESCHI = ("   AND (p.pubblicato_il IS NULL OR p.pubblicato_il > ?)"
+# Quando la data di pubblicazione manca — l'actor può cambiare formato — si
+# usa il giorno in cui l'abbiamo scaricato: un post senza data non deve restare
+# in lista per sempre, ma nemmeno sparire solo perché non sappiamo quand'è
+# uscito, perché l'abbiamo comunque appena trovato.
+_FRESCHI = ("   AND COALESCE(p.pubblicato_il, p.visto_il) > ?"
             "   AND (c.id IS NULL OR c.stato <> 'Chiuso')")
 
 
@@ -555,18 +566,30 @@ def decidi(commento_id: int, azione: str, testo: str = None) -> dict:
 
     db = get_db()
     try:
+        # «Riscrivilo» cancella la proposta e ne crea un'altra con un altro
+        # numero. Chi avesse la pagina aperta da prima approverebbe un numero che
+        # non esiste più: l'aggiornamento non troverebbe nulla, l'esito direbbe
+        # comunque «fatto», e le correzioni appena scritte sparirebbero senza che
+        # nessuno se ne accorga. RETURNING dice se una riga è stata toccata.
         if azione == "pubblicato":
             # Il testo resta modificabile anche dopo l'approvazione: va salvato
             # quello davvero copiato, altrimenti in archivio resta una versione
             # diversa da quella finita sotto il post — e la misura di quanto
             # scriviamo bene si baserebbe su un testo mai pubblicato.
-            db.execute("UPDATE linkedin_commenti SET stato = ?, pubblicato_il = CURRENT_TIMESTAMP,"
-                       " testo_finale = COALESCE(?, testo_finale) WHERE id = ?",
-                       (nuovo, pulito, commento_id))
+            riga = db.execute(
+                "UPDATE linkedin_commenti SET stato = ?, pubblicato_il = CURRENT_TIMESTAMP,"
+                " testo_finale = COALESCE(?, testo_finale) WHERE id = ? RETURNING id",
+                (nuovo, pulito, commento_id)).fetchone()
         else:
-            db.execute("UPDATE linkedin_commenti SET stato = ?, deciso_il = CURRENT_TIMESTAMP,"
-                       " testo_finale = COALESCE(?, testo_finale) WHERE id = ?",
-                       (nuovo, pulito, commento_id))
+            riga = db.execute(
+                "UPDATE linkedin_commenti SET stato = ?, deciso_il = CURRENT_TIMESTAMP,"
+                " testo_finale = COALESCE(?, testo_finale) WHERE id = ? RETURNING id",
+                (nuovo, pulito, commento_id)).fetchone()
+
+        if not riga:
+            return {"ok": False, "scomparso": True,
+                    "errore": "Questa proposta è stata rifatta nel frattempo: ricarica la "
+                              "pagina. Copia il tuo testo prima, o andrà perso."}
 
         if azione == "scarta":
             # «Lascia perdere» vuol dire «su questo post non commento», non

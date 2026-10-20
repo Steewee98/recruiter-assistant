@@ -29,6 +29,28 @@ _ricerca_lock = threading.Lock()
 _ricerca = {"in_corso": False, "esito": None}
 
 
+def _corpo():
+    """Il corpo della richiesta, sempre come dizionario.
+
+    `get_json` restituisce quello che gli arriva: una lista, un numero, una
+    stringa. Chiamarci `.get()` sopra solleverebbe un'eccezione e il browser
+    riceverebbe un errore del server al posto di una spiegazione.
+    """
+    dati = request.get_json(silent=True)
+    return dati if isinstance(dati, dict) else {}
+
+
+def _testo(dati: dict, chiave: str) -> str:
+    """Il valore di un campo, solo se è davvero testo.
+
+    Un numero al posto di una stringa (`{"urn": 123}`) farebbe fallire lo
+    `.strip()`: qui diventa semplicemente un campo vuoto, che le route trattano
+    già come «manca».
+    """
+    v = dati.get(chiave)
+    return v.strip() if isinstance(v, str) else ""
+
+
 @commenti_bp.route("/commenti")
 @login_required
 def index():
@@ -48,11 +70,12 @@ def dati():
 @login_required
 def scarica():
     """Avvia la ricerca dei post nuovi. È l'unico punto in cui si spende."""
-    corpo = request.get_json(silent=True) or {}
+    corpo = _corpo()
     try:
         giorni = int(corpo.get("giorni", 7))
     except (TypeError, ValueError):
         giorni = 7
+    giorni = min(max(giorni, 1), 30)
 
     with _ricerca_lock:
         if _ricerca["in_corso"]:
@@ -85,8 +108,7 @@ def stato_ricerca():
 @login_required
 def genera():
     """Scrive la proposta per un post. Una alla volta: Argon può metterci minuti."""
-    corpo = request.get_json(silent=True) or {}
-    urn = (corpo.get("urn") or "").strip()
+    urn = _testo(_corpo(), "urn")
     if not urn:
         return jsonify({"ok": False, "errore": "Manca il post."}), 400
     try:
@@ -100,10 +122,19 @@ def genera():
 @login_required
 def decidi():
     """Approva (con le eventuali correzioni di Sabia), scarta, o segna pubblicato."""
-    corpo = request.get_json(silent=True) or {}
+    corpo = _corpo()
     try:
         commento_id = int(corpo.get("id"))
     except (TypeError, ValueError):
         return jsonify({"ok": False, "errore": "Manca la proposta."}), 400
-    esito = cl.decidi(commento_id, (corpo.get("azione") or "").strip(), corpo.get("testo"))
-    return jsonify(esito), (200 if esito.get("ok") else 400)
+
+    testo = corpo.get("testo")
+    if testo is not None and not isinstance(testo, str):
+        return jsonify({"ok": False, "errore": "Il testo del commento non è testo."}), 400
+
+    esito = cl.decidi(commento_id, _testo(corpo, "azione"), testo)
+    if esito.get("ok"):
+        return jsonify(esito)
+    # Una proposta rifatta altrove non è un errore di chi scrive: è un conflitto,
+    # e la pagina lo distingue per avvisare senza far perdere il testo.
+    return jsonify(esito), (409 if esito.get("scomparso") else 400)
