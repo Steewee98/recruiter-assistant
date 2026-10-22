@@ -59,69 +59,13 @@
 
 </div>
 
-<!-- Commenti pronti: in cima, perché è la cosa da fare appena si entra -->
-<div class="card dash-commenti">
-  <div class="card-header">
-    <span>Da commentare questa settimana</span>
-    <a href="{{ url_for('commenti.index') }}" class="btn btn-sm">Tutti i post</a>
-  </div>
-  {% if da_commentare %}
-  <p class="bc-intro">
-    Post pubblicati negli ultimi sette giorni da persone che stiamo seguendo,
-    con il commento già scritto. Leggi, correggi se serve, approva.
-  </p>
-  <ul class="bc-lista">
-    {% for p in da_commentare %}
-    <li class="bc-riga" id="bc-{{ p.commento_id }}">
-      <div class="bc-testa">
-        <div class="bc-foto">
-          {% if p.autore_foto %}
-          <img src="{{ p.autore_foto }}" alt=""
-               onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
-          <div class="bc-iniziali" style="display:none;">{{ (p.nome or p.autore_nome or '?')[:1] }}{{ (p.cognome or ' ')[:1] }}</div>
-          {% else %}
-          <div class="bc-iniziali">{{ (p.nome or p.autore_nome or '?')[:1] }}{{ (p.cognome or ' ')[:1] }}</div>
-          {% endif %}
-        </div>
-        <div class="bc-chi">
-          <span class="bc-nome">{{ p.autore_nome or ((p.nome or '') ~ ' ' ~ (p.cognome or '')) }}</span>
-          <span class="bc-ruolo">{{ p.azienda or p.ruolo_attuale or '' }}</span>
-        </div>
-        {% if p.punteggio_candidato %}
-        <a class="bc-voto {% if p.punteggio_candidato >= 8 %}bc-voto--alto{% endif %}"
-           href="{{ url_for('pipeline.index') }}?report={{ p.candidato_id }}"
-           title="Punteggio del report">{{ p.punteggio_candidato }}</a>
-        {% endif %}
-      </div>
 
-      <div class="bc-post">{{ (p.testo or '')[:230] }}{% if (p.testo or '')|length > 230 %}…{% endif %}</div>
-      {% if p.url %}<a class="bc-link" href="{{ p.url }}" target="_blank" rel="noopener">vedi il post</a>{% endif %}
-
-      <textarea class="bc-area" id="bc-testo-{{ p.commento_id }}"
-                maxlength="300">{{ p.testo_finale or p.testo_proposto }}</textarea>
-      <div class="bc-azioni">
-        {% if p.stato_commento == 'approvato' %}
-        <span class="bc-ok">Approvato</span>
-        <button class="btn btn-sm" onclick="bcCopia({{ p.commento_id }})">Copia</button>
-        <button class="btn btn-sm btn-primary" onclick="bcDecidi({{ p.commento_id }}, 'pubblicato')">L'ho pubblicato</button>
-        {% else %}
-        <button class="btn btn-sm btn-primary" onclick="bcDecidi({{ p.commento_id }}, 'approva')">Approva</button>
-        <button class="btn btn-sm" onclick="bcDecidi({{ p.commento_id }}, 'scarta')">Lascia perdere</button>
-        {% endif %}
-        <span class="bc-stato" id="bc-stato-{{ p.commento_id }}"></span>
-      </div>
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p class="dash-empty">
-    Nessun commento pronto. I post si cercano dalla
-    <a href="{{ url_for('commenti.index') }}">sezione Commenti</a>.
-  </p>
-  {% endif %}
-</div>
-
-
+<!-- ════════════════════════════════════════════════════════
+     TESTA OPERATIVA — l'elenco di uno stato e i post da commentare,
+     affiancati. Finché non si apre uno stato i post prendono tutta la
+     larghezza: la colonna vuota sarebbe solo spazio sprecato.
+════════════════════════════════════════════════════════ -->
+<div class="dash-testa" id="dash-testa">
 
 <!-- ════════════════════════════════════════════════════════
      PANNELLO CANDIDATI PER STATO (espandibile)
@@ -164,6 +108,102 @@
     </p>
   </div>
 </div>
+
+<!-- Commenti pronti: in cima, perché è la cosa da fare appena si entra -->
+<div class="card dash-commenti">
+  <div class="card-header">
+    <span>Da commentare questa settimana</span>
+    <a href="{{ url_for('commenti.index') }}" class="btn btn-sm">Tutti i post</a>
+  </div>
+  {% if da_commentare %}
+  <p class="bc-intro">
+    Post pubblicati negli ultimi sette giorni da persone che stiamo seguendo,
+    con il commento già scritto. Leggi, correggi se serve, approva.
+  </p>
+  <ul class="bc-lista">
+    {% for p in da_commentare %}
+    <li class="bc-riga {% if p.stato_commento == 'approvato' %}bc-riga--pronto{% endif %}"
+        id="bc-{{ p.commento_id }}">
+
+      <!-- chi ha scritto -->
+      <header class="bc-testa">
+        <div class="bc-foto">
+          {% if p.autore_foto %}
+          <img src="{{ p.autore_foto }}" alt=""
+               onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
+          <div class="bc-iniziali" style="display:none;">{{ (p.nome or p.autore_nome or '?')[:1] }}{{ (p.cognome or ' ')[:1] }}</div>
+          {% else %}
+          <div class="bc-iniziali">{{ (p.nome or p.autore_nome or '?')[:1] }}{{ (p.cognome or ' ')[:1] }}</div>
+          {% endif %}
+        </div>
+        <div class="bc-chi">
+          <span class="bc-nome">
+            {% if p.autore_url %}
+            <a href="{{ p.autore_url }}" target="_blank" rel="noopener">{{ p.autore_nome or ((p.nome or '') ~ ' ' ~ (p.cognome or '')) }}</a>
+            {% else %}
+            {{ p.autore_nome or ((p.nome or '') ~ ' ' ~ (p.cognome or '')) }}
+            {% endif %}
+          </span>
+          <span class="bc-ruolo">
+            {%- if p.ruolo_attuale %}{{ p.ruolo_attuale }}{% endif -%}
+            {%- if p.ruolo_attuale and p.azienda %} · {% endif -%}
+            {%- if p.azienda %}{{ p.azienda }}{% endif -%}
+          </span>
+        </div>
+        {% if p.punteggio_candidato %}
+        <a class="bc-voto {% if p.punteggio_candidato >= 8 %}bc-voto--alto{% elif p.punteggio_candidato < 6 %}bc-voto--basso{% endif %}"
+           href="{{ url_for('pipeline.index') }}?report={{ p.candidato_id }}"
+           title="Punteggio del report. Apri per leggerlo.">
+          <strong>{{ p.punteggio_candidato }}</strong><span>su 10</span>
+        </a>
+        {% endif %}
+      </header>
+
+      <!-- il post -->
+      <div class="bc-testo">{{ (p.testo or '')[:400] }}{% if (p.testo or '')|length > 400 %}…{% endif %}</div>
+
+      <div class="bc-numeri">
+        <span>{{ p.reazioni or 0 }} reazioni</span>
+        <span>{{ p.commenti or 0 }} commenti</span>
+        {% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener">apri su LinkedIn</a>{% endif %}
+      </div>
+
+      <!-- la nuvoletta: il commento di Sabia sta sotto il post, come su LinkedIn -->
+      <div class="bc-risposta">
+        <div class="bc-foto bc-foto--mia"><div class="bc-iniziali bc-iniziali--mia">SS</div></div>
+        <div class="bc-nuvola">
+          <div class="bc-nuvola-testa">
+            <span>Salvatore Sabia</span>
+            {% if p.autore_testo %}<em>proposta scritta da {{ p.autore_testo }}</em>{% endif %}
+          </div>
+          <textarea class="bc-area" id="bc-testo-{{ p.commento_id }}"
+                    maxlength="300">{{ p.testo_finale or p.testo_proposto }}</textarea>
+          <div class="bc-azioni">
+            {% if p.stato_commento == 'approvato' %}
+            <span class="bc-ok">Approvato</span>
+            <button class="btn btn-sm" onclick="bcCopia({{ p.commento_id }})">Copia</button>
+            <button class="btn btn-sm btn-primary" onclick="bcDecidi({{ p.commento_id }}, 'pubblicato')">L'ho pubblicato</button>
+            {% else %}
+            <button class="btn btn-sm btn-primary" onclick="bcDecidi({{ p.commento_id }}, 'approva')">Approva</button>
+            <button class="btn btn-sm" onclick="bcDecidi({{ p.commento_id }}, 'scarta')">Lascia perdere</button>
+            {% endif %}
+            <span class="bc-stato" id="bc-stato-{{ p.commento_id }}"></span>
+          </div>
+        </div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="dash-empty">
+    Nessun commento pronto. I post si cercano dalla
+    <a href="{{ url_for('commenti.index') }}">sezione Commenti</a>.
+  </p>
+  {% endif %}
+</div>
+
+</div><!-- fine dash-testa -->
+
 
 <!-- ════════════════════════════════════════════════════════
      SEZIONE CENTRALE — DUE COLONNE
@@ -478,12 +518,18 @@ function apriStato(card) {
   const panel = document.getElementById("stato-panel");
   panel.classList.remove("hidden");
   panel.style.setProperty("--panel-accent", color);
+  // La testa passa a due colonne solo adesso: con il pannello chiuso i post
+  // da commentare devono restare larghi.
+  document.getElementById("dash-testa").classList.add("aperto");
   document.getElementById("stato-skeleton").classList.remove("hidden");
   document.getElementById("stato-table").classList.add("hidden");
   document.getElementById("stato-empty").classList.add("hidden");
 
-  // Scroll al pannello
-  setTimeout(() => panel.scrollIntoView({ behavior: "smooth", block: "nearest" }), 80);
+  // Niente salti: il pannello è già in cima. Si risale solo se Sabia aveva
+  // scrollato via e altrimenti non vedrebbe comparire nulla.
+  setTimeout(() => {
+    if (window.scrollY > 240) window.scrollTo({ top: 0, behavior: "smooth" });
+  }, 80);
 
   // Fetch candidati
   fetch("/dashboard/candidati/" + encodeURIComponent(stato))
@@ -602,6 +648,7 @@ function _rigaCandidato(c) {
 function chiudiPanel() {
   _statoAttivo = null;
   document.getElementById("stato-panel").classList.add("hidden");
+  document.getElementById("dash-testa").classList.remove("aperto");
   document.querySelectorAll(".dash-card--clickable").forEach(function(c) {
     c.classList.remove("dash-card--active");
   });
@@ -977,43 +1024,101 @@ function apriReportDashboard(candidatoId) {
 
 
 <style>
+/* ── Testa operativa: elenco dello stato e post da commentare, affiancati ──
+   Con il pannello chiuso la griglia ha una colonna sola: i post si prendono
+   tutta la larghezza invece di lasciare mezzo schermo bianco. */
+.dash-testa { display: grid; grid-template-columns: 1fr; gap: 1.1rem;
+              align-items: start; margin-bottom: 1.4rem; }
+.dash-testa.aperto { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.dash-testa > * { min-width: 0; margin-bottom: 0; }
+
+/* Ognuna delle due colonne scorre per conto suo: così la pagina resta ferma
+   e Sabia non deve scendere in fondo per tornare all'altra. */
+.dash-testa .stato-panel,
+.dash-testa .dash-commenti { max-height: calc(100vh - 230px); display: flex;
+                             flex-direction: column; overflow: hidden; }
+.dash-testa #stato-body { overflow: auto; flex: 1 1 auto; min-height: 0; }
 .dash-commenti .card-header { align-items: center; }
 .bc-intro { font-size: 0.82rem; color: var(--grigio-testo); line-height: 1.5;
             margin: 0 0 0.9rem; }
-.bc-lista { list-style: none; margin: 0; padding: 0; display: flex;
-            flex-direction: column; gap: 0.9rem; }
-.bc-riga { border: 1px solid #E4EAF4; border-radius: 12px; padding: 0.85rem 0.95rem;
-           transition: opacity .25s; }
-.bc-testa { display: grid; grid-template-columns: 38px 1fr auto; gap: 0.6rem;
-            align-items: center; margin-bottom: 0.6rem; }
-.bc-foto { width: 38px; height: 38px; border-radius: 50%; overflow: hidden; background: #EDF2FA; }
+.bc-lista { list-style: none; margin: 0; padding: 0 0.2rem 0.2rem 0; display: flex;
+            flex-direction: column; gap: 0.85rem; overflow-y: auto;
+            /* flex:1 + min-height:0 è la coppia che fa scorrere il figlio
+               invece di far crescere il contenitore oltre l'altezza massima. */
+            flex: 1 1 auto; min-height: 0; }
+
+/* ── Il post, nel formato in cui lo si è letto su LinkedIn ── */
+.bc-riga { background: #FFF; border: 1px solid #E4EAF4; border-radius: 14px;
+           padding: 0.95rem 1rem 1rem; }
+.bc-riga--pronto { border-color: #BFE3CE; box-shadow: 0 0 0 3px #EEF8F2; }
+.bc-testa { display: grid; grid-template-columns: 44px 1fr auto; gap: 0.7rem;
+            align-items: center; margin-bottom: 0.7rem; }
+.bc-foto { width: 44px; height: 44px; border-radius: 50%; overflow: hidden;
+           background: #EDF2FA; flex-shrink: 0; }
 .bc-foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .bc-iniziali { width: 100%; height: 100%; display: grid; place-items: center;
-               font-weight: 700; font-size: 0.78rem; color: #4A6FA8; background: #E8F1FF; }
+               font-size: 0.82rem; font-weight: 700; color: #7D8DA8; }
 .bc-chi { min-width: 0; }
-.bc-nome { display: block; font-size: 0.88rem; font-weight: 700; color: var(--blu-scuro);
-           line-height: 1.25; }
+.bc-nome { display: block; font-size: 0.9rem; font-weight: 700; color: var(--blu-scuro);
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc-nome a { color: inherit; text-decoration: none; }
+.bc-nome a:hover { text-decoration: underline; }
 .bc-ruolo { display: block; font-size: 0.75rem; color: var(--grigio-testo);
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bc-voto { font-size: 0.82rem; font-weight: 700; color: #1D5BD6; background: #F3F7FD;
-           border: 1px solid #DDE8F7; border-radius: 8px; padding: 0.15rem 0.45rem;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc-voto { display: inline-flex; align-items: baseline; gap: 0.28rem; background: #F3F7FD;
+           border: 1px solid #DCE6F5; border-radius: 9px; padding: 0.28rem 0.5rem;
            text-decoration: none; }
-.bc-voto--alto { color: #1B7A46; background: #ECF9F1; border-color: #BFE3CE; }
-.bc-post { font-size: 0.8rem; line-height: 1.55; color: #5A6B8C; background: #F7F9FD;
-           border-radius: 8px; padding: 0.55rem 0.7rem; white-space: pre-line; }
-.bc-link { display: inline-block; font-size: 0.74rem; color: var(--azzurro);
-           text-decoration: none; margin: 0.35rem 0 0.1rem; }
-.bc-link:hover { text-decoration: underline; }
-.bc-area { width: 100%; min-height: 66px; border: 1px solid #DCE5F2; border-radius: 9px;
-           padding: 0.5rem 0.65rem; font-family: inherit; font-size: 0.84rem;
-           line-height: 1.55; color: var(--blu-scuro); resize: vertical; margin-top: 0.5rem; }
+.bc-voto:hover { background: #E8F1FF; border-color: #BFD8F7; }
+.bc-voto strong { font-size: 1rem; font-weight: 700; color: #1D5BD6; }
+.bc-voto span { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em;
+                color: #8FA3C4; }
+.bc-voto--alto { background: #ECF9F1; border-color: #BFE3CE; }
+.bc-voto--alto strong { color: #1B7A46; }
+.bc-voto--basso { background: #FBF4F2; border-color: #EBD6CE; }
+.bc-voto--basso strong { color: #B4471F; }
+/* Il limite in ch tiene la riga leggibile anche quando la scheda è larga
+   tutta la pagina: oltre i settanta caratteri l'occhio perde il capo riga. */
+.bc-testo { font-size: 0.84rem; line-height: 1.6; color: #44536E;
+            white-space: pre-wrap; margin-bottom: 0.5rem; max-width: 74ch; }
+.bc-numeri { display: flex; gap: 0.85rem; font-size: 0.72rem; color: #9AA8C2;
+             padding-bottom: 0.7rem; border-bottom: 1px solid #EDF1F8; }
+.bc-numeri a { color: var(--azzurro); text-decoration: none; }
+.bc-numeri a:hover { text-decoration: underline; }
+
+/* ── La nuvoletta della risposta, con la codina verso l'avatar ── */
+.bc-risposta { display: grid; grid-template-columns: 34px 1fr; gap: 0.55rem;
+               margin-top: 0.8rem; align-items: start; }
+.bc-foto--mia { width: 34px; height: 34px; background: var(--blu-scuro); }
+.bc-iniziali--mia { color: #FFF; font-size: 0.72rem; }
+.bc-nuvola { position: relative; background: #F4F7FC; border: 1px solid #E2EAF6;
+             border-radius: 12px; padding: 0.6rem 0.7rem 0.7rem; max-width: 80ch; }
+.bc-nuvola::before { content: ""; position: absolute; left: -9px; top: 11px;
+                     border: 5px solid transparent; border-right-color: #E2EAF6;
+                     border-left: 0; }
+.bc-nuvola::after { content: ""; position: absolute; left: -7px; top: 12px;
+                    border: 4px solid transparent; border-right-color: #F4F7FC;
+                    border-left: 0; }
+.bc-nuvola-testa { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;
+                   font-size: 0.78rem; font-weight: 700; color: var(--blu-scuro);
+                   margin-bottom: 0.4rem; }
+.bc-nuvola-testa em { font-style: normal; font-weight: 500; font-size: 0.7rem;
+                      color: #9AA8C2; }
+.bc-area { width: 100%; min-height: 70px; border: 1px solid #DCE5F2; border-radius: 9px;
+           padding: 0.5rem 0.6rem; font-size: 0.82rem; line-height: 1.5;
+           font-family: inherit; color: var(--testo); resize: vertical; background: #FFF; }
 .bc-area:focus { outline: none; border-color: var(--azzurro); box-shadow: 0 0 0 3px #E8F1FF; }
 .bc-azioni { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
-             margin-top: 0.45rem; }
+             margin-top: 0.5rem; }
 .bc-ok { font-size: 0.74rem; font-weight: 700; color: #1B7A46; background: #ECF9F1;
-         border-radius: 6px; padding: 0.15rem 0.4rem; }
+         border-radius: 20px; padding: 0.15rem 0.55rem; }
 .bc-stato { font-size: 0.74rem; color: var(--grigio-testo); }
 .bc-stato.male { color: #B4471F; }
+
+@media (max-width: 1100px) {
+  .dash-testa.aperto { grid-template-columns: 1fr; }
+  .dash-testa .stato-panel,
+  .dash-testa .dash-commenti { max-height: none; }
+}
 </style>
 
 <script>
