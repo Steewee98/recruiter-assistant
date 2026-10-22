@@ -88,20 +88,7 @@
     </div>
 
     <!-- tabella risultati -->
-    <table class="data-table stato-table hidden" id="stato-table">
-      <thead>
-        <tr>
-          <th>Candidato</th>
-          <th>Ruolo / Azienda</th>
-          <th>Profilo</th>
-          <th>Punteggio</th>
-          <th>Stato</th>
-          <th>Gestore</th>
-          <th>Inserito</th>
-        </tr>
-      </thead>
-      <tbody id="stato-tbody"></tbody>
-    </table>
+    <ul class="sp-lista hidden" id="stato-table"></ul>
 
     <p class="stato-empty hidden" id="stato-empty">
       Nessun candidato in questo stato.
@@ -569,7 +556,7 @@ function apriStato(card) {
         if (tot === 0) {
           document.getElementById("stato-empty").classList.remove("hidden");
         } else {
-          document.getElementById("stato-tbody").innerHTML = html;
+          document.getElementById("stato-table").innerHTML = html;
           document.getElementById("stato-table").classList.remove("hidden");
         }
         return;
@@ -580,7 +567,7 @@ function apriStato(card) {
         return;
       }
 
-      const tbody = document.getElementById("stato-tbody");
+      const tbody = document.getElementById("stato-table");
       tbody.innerHTML = data.candidati.map(function(c) { return _rigaCandidato(c); }).join("");
 
       // Salva dati candidati per il report modal
@@ -598,51 +585,40 @@ function apriStato(card) {
 // Riga candidato riutilizzabile
 function _rigaCandidato(c) {
   const nome    = [c.nome, c.cognome].filter(Boolean).join(" ") || "\u2014";
-  const ruolo   = c.ruolo_attuale || "\u2014";
+  const ruolo   = c.ruolo_attuale || "";
   const azienda = c.azienda || "";
-  const profilo = c.tipo_profilo || "\u2014";
+  const profilo = c.tipo_profilo || "";
   const punt10  = c.punteggio;
-  const scoreClass = punt10 != null ? (punt10 >= 8 ? 'score-alto' : (punt10 >= 6 ? 'score-medio' : 'score-basso')) : '';
-  const hasReport  = !!(c.analisi || (c.spunti && c.spunti !== '[]'));
-  const puntHtml = punt10 != null
-    ? "<span class='dash-punt " + scoreClass + "'><b>" + punt10 + "</b>/10</span>"
-      + (hasReport ? " <button class='btn btn-sm btn-report' onclick='apriReportDashboard(" + c.id + ")' title='Vedi Report AI'>Report</button>" : "")
-    : "<span style='color:var(--grigio-testo)'>\u2014</span>";
-  const gestore = c.gestore || "\u2014";
-  const data_ins = (c.data_inserimento || "").slice(0, 10);
-  const pBadge  = "<span class='badge badge-profilo" + profilo + "'>" + profilo + "</span>";
-  const gShort  = gestore === "Salvatore Sabia" ? "Sabia"
-                : gestore === "Firdaous Filahi" ? "Firdaous" : gestore;
+  const classe  = punt10 != null ? (punt10 >= 8 ? 'sp-voto--alto' : (punt10 >= 6 ? '' : 'sp-voto--basso')) : '';
+  const hasReport = !!(c.analisi || (c.spunti && c.spunti !== '[]'));
+  const iniz = ((c.nome || "?")[0] + (c.cognome || " ")[0]).toUpperCase();
 
-  // Dropdown stato con label raggruppate
   var statoOpts = STATI_DROPDOWN.map(function(s) {
     var sel = s.value === c.stato ? ' selected' : '';
     return '<option value="' + escHtml(s.value) + '"' + sel + '>' + escHtml(s.label) + '</option>';
   }).join('');
-  var statoHtml = "<select class='dash-stato-select' data-id='" + c.id + "' "
-    + "data-stato-originale='" + escHtml(c.stato) + "' "
-    + "onchange='cambiaStatoDashboard(this)' "
-    + "style='--select-color:" + (STATO_COLORS[c.stato] || '#6B7A99') + "'>"
-    + statoOpts + "</select>";
 
-  // Link al profilo LinkedIn sotto al nome: da qui parte la telefonata, avere
-  // l'indirizzo a portata evita di ricercarlo a mano ogni volta.
-  var linkLi = "";
-  if (c.profilo_linkedin) {
-    linkLi = "<a href='" + escHtml(c.profilo_linkedin) + "' target='_blank' rel='noopener' "
-           + "class='candidato-linkedin' title='" + escHtml(c.profilo_linkedin) + "'>"
-           + "&#128279; profilo LinkedIn</a>";
-  }
+  var secondaRiga = [ruolo, azienda].filter(Boolean).join(" \u00b7 ");
 
-  return "<tr data-candidato-id='" + c.id + "'>"
-    + "<td><div class='candidato-nome'>" + nome + "</div>" + linkLi + "</td>"
-    + "<td><div>" + ruolo + "</div><div class='candidato-meta'>" + azienda + "</div></td>"
-    + "<td>" + pBadge + "</td>"
-    + "<td>" + puntHtml + "</td>"
-    + "<td>" + statoHtml + "</td>"
-    + "<td>" + gShort + "</td>"
-    + "<td class='candidato-meta'>" + data_ins + "</td>"
-    + "</tr>";
+  return "<li class='sp-riga' data-candidato-id='" + c.id + "'>"
+    + "<div class='sp-iniz'>" + escHtml(iniz) + "</div>"
+    + "<div class='sp-chi'>"
+      + "<div class='sp-nome'>" + escHtml(nome)
+      + (profilo ? " <span class='badge badge-profilo" + profilo + "'>" + profilo + "</span>" : "")
+      + "</div>"
+      + (secondaRiga ? "<div class='sp-ruolo'>" + escHtml(secondaRiga) + "</div>" : "")
+      + "<div class='sp-sotto'>"
+        + "<select class='dash-stato-select' data-id='" + c.id + "' "
+          + "data-stato-originale='" + escHtml(c.stato) + "' "
+          + "onchange='cambiaStatoDashboard(this)' "
+          + "style='--select-color:" + (STATO_COLORS[c.stato] || '#6B7A99') + "'>"
+          + statoOpts + "</select>"
+        + (hasReport ? "<button class='btn btn-sm btn-report' onclick='apriReportDashboard(" + c.id + ")'>Report</button>" : "")
+        + (c.profilo_linkedin ? "<a href='" + escHtml(c.profilo_linkedin) + "' target='_blank' rel='noopener' class='sp-link'>LinkedIn</a>" : "")
+      + "</div>"
+    + "</div>"
+    + (punt10 != null ? "<span class='sp-voto " + classe + "'><strong>" + punt10 + "</strong><span>su 10</span></span>" : "")
+    + "</li>";
 }
 
 function chiudiPanel() {
@@ -954,6 +930,36 @@ function apriReportDashboard(candidatoId) {
 }
 
 .stato-table { margin: 0; }
+/* ── Elenco dei candidati di uno stato ──
+   Era una tabella a sette colonne: in mezza pagina le colonne finivano fuori
+   e si vedevano tagliate. Un elenco di schede si adatta alla larghezza che ha. */
+.sp-lista { list-style: none; margin: 0; padding: 0.6rem 0.9rem 0.9rem;
+            display: flex; flex-direction: column; gap: 0.5rem; }
+.sp-riga { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto;
+           gap: 0.65rem; align-items: center; background: #FFF;
+           border: 1px solid #E8EDF6; border-radius: 11px; padding: 0.6rem 0.7rem; }
+.sp-iniz { width: 36px; height: 36px; border-radius: 50%; background: #EDF2FA;
+           display: grid; place-items: center; font-size: 0.74rem; font-weight: 700;
+           color: #7D8DA8; }
+.sp-chi { min-width: 0; }
+.sp-nome { font-size: 0.86rem; font-weight: 700; color: var(--blu-scuro);
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-ruolo { font-size: 0.74rem; color: var(--grigio-testo); margin-top: 1px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-sotto { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;
+            margin-top: 0.4rem; }
+.sp-link { font-size: 0.72rem; color: var(--azzurro); text-decoration: none; }
+.sp-link:hover { text-decoration: underline; }
+.sp-voto { display: inline-flex; flex-direction: column; align-items: center;
+           background: #F3F7FD; border: 1px solid #DCE6F5; border-radius: 9px;
+           padding: 0.22rem 0.45rem; line-height: 1.1; }
+.sp-voto strong { font-size: 0.95rem; color: #1D5BD6; }
+.sp-voto span { font-size: 0.56rem; text-transform: uppercase; letter-spacing: 0.06em;
+                color: #8FA3C4; }
+.sp-voto--alto { background: #ECF9F1; border-color: #BFE3CE; }
+.sp-voto--alto strong { color: #1B7A46; }
+.sp-voto--basso { background: #FBF4F2; border-color: #EBD6CE; }
+.sp-voto--basso strong { color: #B4471F; }
 .stato-empty { padding: 1.5rem; text-align: center; color: var(--grigio-testo); }
 .hidden { display: none !important; }
 
@@ -1039,27 +1045,33 @@ function apriReportDashboard(candidatoId) {
                              flex-direction: column; overflow: hidden; }
 .dash-testa #stato-body { overflow: auto; flex: 1 1 auto; min-height: 0; }
 .dash-commenti .card-header { align-items: center; }
-.bc-intro { font-size: 0.82rem; color: var(--grigio-testo); line-height: 1.5;
-            margin: 0 0 0.9rem; }
-.bc-lista { list-style: none; margin: 0; padding: 0 0.2rem 0.2rem 0; display: flex;
+.bc-intro { font-size: 0.8rem; color: var(--grigio-testo); line-height: 1.5;
+            margin: 0; padding: 0.7rem 0.9rem 0.8rem; background: #FFF;
+            border-bottom: 1px solid #E8EDF6; }
+/* Lo sfondo grigio dietro le schede bianche è quello che fa leggere il blocco
+   come un feed invece che come un elenco dentro una scheda: senza stacco,
+   bianco su bianco, i post non si staccano l'uno dall'altro. */
+.dash-commenti { background: #F1F4FA; }
+.dash-commenti .card-header { background: #FFF; }
+.bc-lista { list-style: none; margin: 0; padding: 0 0.9rem 0.9rem; display: flex;
             flex-direction: column; gap: 0.85rem; overflow-y: auto;
             /* flex:1 + min-height:0 è la coppia che fa scorrere il figlio
                invece di far crescere il contenitore oltre l'altezza massima. */
             flex: 1 1 auto; min-height: 0; }
 
 /* ── Il post, nel formato in cui lo si è letto su LinkedIn ── */
-.bc-riga { background: #FFF; border: 1px solid #E4EAF4; border-radius: 14px;
-           padding: 0.95rem 1rem 1rem; }
+.bc-riga { background: #FFF; border: 1px solid #E2E8F3; border-radius: 10px;
+           padding: 1rem 1.05rem 1.05rem; }
 .bc-riga--pronto { border-color: #BFE3CE; box-shadow: 0 0 0 3px #EEF8F2; }
-.bc-testa { display: grid; grid-template-columns: 44px 1fr auto; gap: 0.7rem;
-            align-items: center; margin-bottom: 0.7rem; }
-.bc-foto { width: 44px; height: 44px; border-radius: 50%; overflow: hidden;
+.bc-testa { display: grid; grid-template-columns: 48px 1fr auto; gap: 0.75rem;
+            align-items: center; margin-bottom: 0.75rem; }
+.bc-foto { width: 48px; height: 48px; border-radius: 50%; overflow: hidden;
            background: #EDF2FA; flex-shrink: 0; }
 .bc-foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .bc-iniziali { width: 100%; height: 100%; display: grid; place-items: center;
                font-size: 0.82rem; font-weight: 700; color: #7D8DA8; }
 .bc-chi { min-width: 0; }
-.bc-nome { display: block; font-size: 0.9rem; font-weight: 700; color: var(--blu-scuro);
+.bc-nome { display: block; font-size: 0.95rem; font-weight: 700; color: var(--blu-scuro);
            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bc-nome a { color: inherit; text-decoration: none; }
 .bc-nome a:hover { text-decoration: underline; }
@@ -1078,7 +1090,7 @@ function apriReportDashboard(candidatoId) {
 .bc-voto--basso strong { color: #B4471F; }
 /* Il limite in ch tiene la riga leggibile anche quando la scheda è larga
    tutta la pagina: oltre i settanta caratteri l'occhio perde il capo riga. */
-.bc-testo { font-size: 0.84rem; line-height: 1.6; color: #44536E;
+.bc-testo { font-size: 0.88rem; line-height: 1.58; color: #2C3A52;
             white-space: pre-wrap; margin-bottom: 0.5rem; max-width: 74ch; }
 .bc-numeri { display: flex; gap: 0.85rem; font-size: 0.72rem; color: #9AA8C2;
              padding-bottom: 0.7rem; border-bottom: 1px solid #EDF1F8; }
