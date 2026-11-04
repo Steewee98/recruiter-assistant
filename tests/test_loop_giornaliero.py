@@ -465,6 +465,50 @@ def test_interruttore_si_ricorda_lo_stato():
         L.imposta_attivo(prima)
 
 
+def test_due_notti_di_fila_non_ripetono_le_stesse_ricerche():
+    """
+    Il bug del 3-4/11: tre ricerche su quattro erano quelle della notte prima.
+    Su un anno intero di giorni, nessuna coppia (ruolo, pagina) deve tornare
+    prima che siano state usate tutte le altre.
+    """
+    from datetime import date
+    from services import loop_giornaliero as L
+
+    totale = len(L.RUOLI_LINKEDIN) * len(L.PARTENZE)
+    notti_senza_ripetere = totale // L.MAX_RICERCHE
+    inizio = date(2026, 1, 1).toordinal()
+    for g in range(inizio, inizio + 366):
+        finestra = [c for d in range(g, g + notti_senza_ripetere)
+                    for c in L.ricerche_del_giorno(d)]
+        assert len(finestra) == len(set(finestra)), f"ripetizione entro {notti_senza_ripetere} notti dal giorno {g}"
+
+
+def test_la_rotazione_copre_tutte_le_combinazioni():
+    from services import loop_giornaliero as L
+
+    attese = {(r, p) for p in L.PARTENZE for r in L.RUOLI_LINKEDIN}
+    viste = {c for g in range(800000, 800000 + len(attese)) for c in L.ricerche_del_giorno(g)}
+    assert viste == attese
+
+
+def test_ogni_ricerca_chiede_tre_pagine_e_partenze_diverse():
+    """Una pagina LinkedIn ha 10 profili: con una sola si pagavano 25 e se ne ricevevano 10."""
+    import routes.ricerca as R
+    from services import loop_giornaliero as L
+
+    chiamate = []
+    orig_cerca, orig_albo = R.cerca_apify, L._cerca_nellalbo
+    R.cerca_apify = lambda **kw: (chiamate.append(kw), ([], None))[1]
+    L._cerca_nellalbo = lambda n, c: None
+    try:
+        _, ricerche, _ = L._raccogli_da_linkedin(10)
+    finally:
+        R.cerca_apify, L._cerca_nellalbo = orig_cerca, orig_albo
+    assert ricerche == L.MAX_RICERCHE == len(chiamate)
+    assert all(k["num_pagine"] == L.PAGINE_PER_RICERCA for k in chiamate)
+    assert len({(k["ruolo"], k["start_page"]) for k in chiamate}) == len(chiamate)
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv

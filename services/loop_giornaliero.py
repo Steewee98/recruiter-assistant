@@ -69,6 +69,7 @@ AL_GIORNO = 10
 RUOLI_LINKEDIN = [
     "consulente finanziario", "private banker", "wealth manager",
     "consulente patrimoniale", "financial advisor", "promotore finanziario",
+    "financial planner", "family banker", "wealth advisor", "personal banker",
 ]
 
 # Quante ricerche LinkedIn al massimo per giro. Ogni ricerca costa ~0,10 $ e
@@ -76,6 +77,13 @@ RUOLI_LINKEDIN = [
 # (~0,40 $) oltre il quale non vale la pena insistere.
 MAX_RICERCHE = 4
 PROFILI_PER_RICERCA = 25
+
+# LinkedIn mostra 10 risultati a pagina: con una pagina sola la ricerca rendeva
+# 10 profili anche se il listino «Short» ne paga fino a 25 (log del 3-4/11).
+# Tre pagine riempiono i 25 allo stesso prezzo.
+PAGINE_PER_RICERCA = 3
+# Pagine di partenza a rotazione (1, 4, 7 → pagine 1-9 di ogni ruolo).
+PARTENZE = [1 + i * PAGINE_PER_RICERCA for i in range(3)]
 
 # Budget Apify da lasciare intatto per le ricerche fatte a mano. Sotto questa
 # soglia l'automazione si ferma da sola.
@@ -443,6 +451,21 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool,
     return esito
 
 
+def ricerche_del_giorno(giorno: int) -> list:
+    """
+    Le coppie (ruolo, pagina di partenza) da usare nel giro del giorno `giorno`
+    (date.toordinal()), nell'ordine in cui provarle.
+
+    Ogni giorno prende le MAX_RICERCHE combinazioni successive a quelle del
+    giorno prima. La vecchia formula spostava di uno solo il ruolo da un giorno
+    all'altro, così tre ricerche su quattro erano identiche a quelle della notte
+    prima: si pagavano profili già visti (log Railway del 3-4/11/2026).
+    """
+    combinazioni = [(r, p) for p in PARTENZE for r in RUOLI_LINKEDIN]
+    inizio = giorno * MAX_RICERCHE
+    return [combinazioni[(inizio + t) % len(combinazioni)] for t in range(MAX_RICERCHE)]
+
+
 def _raccogli_da_linkedin(quanti: int):
     """
     Cerca su LinkedIn consulenti con sede a Roma e tiene solo quelli che
@@ -461,14 +484,13 @@ def _raccogli_da_linkedin(quanti: int):
     candidati, visti, ricerche = [], 0, 0
     gia_presi = set()
 
-    for tentativo in range(MAX_RICERCHE):
+    for ruolo, pagina in ricerche_del_giorno(giorno):
         if len(candidati) >= quanti:
             break
-        ruolo = RUOLI_LINKEDIN[(giorno + tentativo) % len(RUOLI_LINKEDIN)]
-        pagina = ((giorno + tentativo) // len(RUOLI_LINKEDIN)) % 5 + 1
         items, errore = cerca_apify(
             ruolo=ruolo, citta="Roma", max_items=PROFILI_PER_RICERCA,
-            start_page=pagina, max_wait=120, modalita="Short",
+            num_pagine=PAGINE_PER_RICERCA, start_page=pagina,
+            max_wait=120, modalita="Short",
         )
         ricerche += 1
         if errore:
