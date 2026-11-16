@@ -345,7 +345,7 @@ def cerca_per_nome():
         resp = requests.post(
             f"{APIFY_BASE}/acts/{APIFY_CERCA_NOME}/runs",
             json=run_input,
-            params={"token": api_key},
+            headers={"Authorization": f"Bearer {api_key}"},
             timeout=15,
         )
         resp.raise_for_status()
@@ -369,7 +369,7 @@ def poll_run(run_id):
         # Controlla stato run
         r = requests.get(
             f"{APIFY_BASE}/actor-runs/{run_id}",
-            params={"token": api_key},
+            headers={"Authorization": f"Bearer {api_key}"},
             timeout=10,
         )
         r.raise_for_status()
@@ -386,7 +386,7 @@ def poll_run(run_id):
         dataset_id = run.get("defaultDatasetId")
         dr = requests.get(
             f"{APIFY_BASE}/datasets/{dataset_id}/items",
-            params={"token": api_key},
+            headers={"Authorization": f"Bearer {api_key}"},
             timeout=15,
         )
         dr.raise_for_status()

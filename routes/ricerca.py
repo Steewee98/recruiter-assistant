@@ -499,6 +499,14 @@ def cerca_apify(ruolo, citta="", paese="", azienda="", parole_chiave="", num_pag
     return _esegui_run_apify(run_input, api_key, max_wait, max_items, progress_cb)
 
 
+def _auth_apify(api_key):
+    """
+    La chiave Apify va nell'intestazione, non nell'indirizzo: un errore HTTP
+    stampa l'indirizzo nei log, e con ?token= la chiave finiva in chiaro.
+    """
+    return {"Authorization": f"Bearer {api_key}"}
+
+
 def _esegui_run_apify(run_input, api_key, max_wait=180, max_items=10, progress_cb=None):
     """
     Avvia una run dell'actor Apify, attende il completamento e restituisce
@@ -515,7 +523,7 @@ def _esegui_run_apify(run_input, api_key, max_wait=180, max_items=10, progress_c
         resp = requests.post(
             f"{APIFY_BASE}/acts/{APIFY_ACTOR}/runs",
             json=run_input,
-            params={"token": api_key},
+            headers=_auth_apify(api_key),
             timeout=30,
         )
         resp.raise_for_status()
@@ -543,7 +551,7 @@ def _esegui_run_apify(run_input, api_key, max_wait=180, max_items=10, progress_c
         try:
             status_resp = requests.get(
                 f"{APIFY_BASE}/actor-runs/{run_id}",
-                params={"token": api_key},
+                headers=_auth_apify(api_key),
                 timeout=10,
             )
             status_resp.raise_for_status()
@@ -570,7 +578,8 @@ def _esegui_run_apify(run_input, api_key, max_wait=180, max_items=10, progress_c
     try:
         items_resp = requests.get(
             f"{APIFY_BASE}/datasets/{dataset_id}/items",
-            params={"token": api_key, "limit": 10},
+            params={"limit": max_items},
+            headers=_auth_apify(api_key),
             timeout=30,
         )
         items_resp.raise_for_status()
@@ -1215,7 +1224,7 @@ def cerca_nome():
         resp = requests.post(
             f"{APIFY_BASE}/acts/{APIFY_ACTOR}/runs",
             json=run_input,
-            params={"token": api_key},
+            headers=_auth_apify(api_key),
             timeout=30,
         )
         resp.raise_for_status()
@@ -1233,7 +1242,7 @@ def cerca_nome():
         elapsed += 5
         try:
             sr = requests.get(f"{APIFY_BASE}/actor-runs/{run_id}",
-                              params={"token": api_key}, timeout=10)
+                              headers=_auth_apify(api_key), timeout=10)
             sr.raise_for_status()
             status = sr.json()["data"].get("status", "")
             if status == "SUCCEEDED":
@@ -1250,7 +1259,8 @@ def cerca_nome():
     try:
         items_resp = requests.get(
             f"{APIFY_BASE}/datasets/{dataset_id}/items",
-            params={"token": api_key, "limit": 5},
+            params={"limit": 5},
+            headers=_auth_apify(api_key),
             timeout=30,
         )
         items_resp.raise_for_status()

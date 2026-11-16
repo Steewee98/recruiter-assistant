@@ -509,6 +509,72 @@ def test_ogni_ricerca_chiede_tre_pagine_e_partenze_diverse():
     assert len({(k["ruolo"], k["start_page"]) for k in chiamate}) == len(chiamate)
 
 
+def test_se_tutte_le_ricerche_falliscono_la_notte_e_un_errore():
+    """Dal 12/11 la chiave Apify scaduta risultava «0 profili, nulla da fare»."""
+    import routes.ricerca as R
+    from services import loop_giornaliero as L
+
+    orig = R.cerca_apify
+    R.cerca_apify = lambda **kw: (None, "Errore avvio ricerca Apify: 401")
+    try:
+        L._raccogli_da_linkedin(10)
+        raise AssertionError("doveva sollevare un errore")
+    except RuntimeError as e:
+        assert "401" in str(e)
+    finally:
+        R.cerca_apify = orig
+
+
+def test_una_ricerca_fallita_su_quattro_non_ferma_la_notte():
+    import routes.ricerca as R
+    from services import loop_giornaliero as L
+
+    risposte = iter([(None, "timeout"), ([], None), ([], None), ([], None)])
+    orig = R.cerca_apify
+    R.cerca_apify = lambda **kw: next(risposte)
+    try:
+        _, ricerche, visti = L._raccogli_da_linkedin(10)
+    finally:
+        R.cerca_apify = orig
+    assert ricerche == 4 and visti == 0
+
+
+def test_apify_legge_tutti_i_profili_chiesti_e_la_chiave_non_va_nell_indirizzo():
+    """Il dataset si leggeva con limit=10: chiedere 25 profili non serviva a niente."""
+    import routes.ricerca as R
+
+    chiamate = []
+
+    class Risposta:
+        def __init__(self, dati): self.dati = dati
+        def raise_for_status(self): pass
+        def json(self): return self.dati
+
+    def finto_post(url, **kw):
+        chiamate.append((url, kw))
+        return Risposta({"data": {"id": "run1", "defaultDatasetId": "ds1"}})
+
+    def finto_get(url, **kw):
+        chiamate.append((url, kw))
+        if "actor-runs" in url:
+            return Risposta({"data": {"status": "SUCCEEDED", "defaultDatasetId": "ds1"}})
+        return Risposta([{"fullName": f"P{i}"} for i in range(25)])
+
+    orig = (R.requests.post, R.requests.get, R.time.sleep)
+    R.requests.post, R.requests.get, R.time.sleep = finto_post, finto_get, lambda s: None
+    try:
+        items, errore = R._esegui_run_apify({}, "CHIAVE-SEGRETA", max_wait=10, max_items=25)
+    finally:
+        R.requests.post, R.requests.get, R.time.sleep = orig
+    assert errore is None and len(items) == 25
+    lettura = [kw for url, kw in chiamate if "/datasets/" in url][0]
+    assert lettura["params"]["limit"] == 25
+    for url, kw in chiamate:
+        assert "CHIAVE-SEGRETA" not in url
+        assert "CHIAVE-SEGRETA" not in str(kw.get("params", ""))
+        assert kw["headers"]["Authorization"] == "Bearer CHIAVE-SEGRETA"
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv

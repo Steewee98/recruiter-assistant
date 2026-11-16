@@ -110,9 +110,9 @@ def _chiama_apify(urls: list, giorni: int) -> list:
         "profileScraperMode": "short",
     }
     req = urllib.request.Request(
-        f"{APIFY_BASE}/acts/{ACTOR}/run-sync-get-dataset-items?token={token}",
+        f"{APIFY_BASE}/acts/{ACTOR}/run-sync-get-dataset-items",
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"})
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"})
     with urllib.request.urlopen(req, timeout=300) as r:
         return json.loads(r.read())
 

@@ -197,7 +197,7 @@ def budget_apify() -> dict:
         return {"noto": False, "motivo": "APIFY_API_KEY non configurata"}
     try:
         r = requests.get("https://api.apify.com/v2/users/me/limits",
-                         params={"token": token}, timeout=20)
+                         headers={"Authorization": f"Bearer {token}"}, timeout=20)
         r.raise_for_status()
         d = r.json()["data"]
         usato = float((d.get("current") or {}).get("monthlyUsageUsd", 0))
@@ -482,7 +482,7 @@ def _raccogli_da_linkedin(quanti: int):
     # ripescherebbe gli stessi primi venticinque profili.
     giorno = date.today().toordinal()
     candidati, visti, ricerche = [], 0, 0
-    gia_presi = set()
+    gia_presi, errori = set(), []
 
     for ruolo, pagina in ricerche_del_giorno(giorno):
         if len(candidati) >= quanti:
@@ -495,6 +495,7 @@ def _raccogli_da_linkedin(quanti: int):
         ricerche += 1
         if errore:
             logger.warning("Loop: ricerca «%s» pagina %d non riuscita: %s", ruolo, pagina, errore)
+            errori.append(errore)
             continue
 
         visti += len(items or [])
@@ -509,6 +510,12 @@ def _raccogli_da_linkedin(quanti: int):
             riga["_linkedin"] = li
             riga["propensione"] = propensione.coefficiente(riga.get("rete", ""), riga.get("eta"))
             candidati.append(riga)
+
+    # Se TUTTE le ricerche falliscono non è una notte vuota, è un guasto:
+    # dal 12/11 la chiave Apify scaduta veniva registrata come «0 profili,
+    # nulla da fare» e nessuno se ne accorgeva.
+    if ricerche and len(errori) == ricerche:
+        raise RuntimeError(f"tutte le {ricerche} ricerche sono fallite. Ultimo errore: {errori[-1]}")
 
     candidati.sort(key=lambda c: -(c["propensione"].get("indice") or 0))
     return candidati[:quanti], ricerche, visti
