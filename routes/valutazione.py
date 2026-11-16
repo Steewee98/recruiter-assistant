@@ -28,11 +28,22 @@ def index():
     return redirect(url_for('pipeline.index', **params))
 
 
+def _dati_richiesta() -> dict:
+    """Il corpo JSON come dizionario: null, una lista o un corpo illeggibile diventano {}."""
+    dati = request.get_json(silent=True)
+    return dati if isinstance(dati, dict) else {}
+
+
+def _testo(valore) -> str:
+    """Un campo di testo ripulito; None o un tipo sbagliato diventano stringa vuota."""
+    return valore.strip() if isinstance(valore, str) else ""
+
+
 @valutazione_bp.route("/valutazione/analizza", methods=["POST"])
 def analizza():
     """Endpoint AJAX per analizzare un profilo LinkedIn."""
-    dati = request.get_json()
-    testo_profilo = dati.get("testo_profilo", "").strip()
+    dati = _dati_richiesta()
+    testo_profilo = _testo(dati.get("testo_profilo"))
     tipo_profilo = dati.get("tipo_profilo", "A")
     candidato_id = dati.get("candidato_id")
 
@@ -126,8 +137,8 @@ def analizza_stream():
     """
     import sys
     print(f"=== ROUTE HIT: {request.path} ===", flush=True)
-    dati              = request.get_json()
-    testo_profilo     = dati.get("testo_profilo", "").strip()
+    dati              = _dati_richiesta()
+    testo_profilo     = _testo(dati.get("testo_profilo"))
     tipo_profilo      = dati.get("tipo_profilo", "A")
     candidato_id      = dati.get("candidato_id")
     punteggio_forzato = dati.get("punteggio_forzato")
@@ -469,8 +480,8 @@ def export_csv():
 @valutazione_bp.route("/valutazione/rigenera_messaggio", methods=["POST"])
 def rigenera_messaggio():
     """Endpoint AJAX per rigenerare o riscrivere il messaggio di outreach."""
-    dati = request.get_json()
-    testo_profilo = dati.get("testo_profilo", "").strip()
+    dati = _dati_richiesta()
+    testo_profilo = _testo(dati.get("testo_profilo"))
     messaggio_attuale = dati.get("messaggio_attuale", "").strip()
     istruzioni = dati.get("istruzioni", "").strip()
 

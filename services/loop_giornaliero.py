@@ -638,11 +638,12 @@ def _importa(profilo: dict, linkedin: dict, analisi: dict):
         db.close()
 
 
-def _registra_run(esito: dict, stato: str) -> None:
+def _registra_run(esito: dict, stato: str):
+    """Scrive il giro nello storico e ritorna l'id della riga (None se non riesce)."""
     import json as _json
     try:
         db = get_db()
-        db.execute(
+        cur = db.execute(
             """INSERT INTO ocf_loop_run (stato, esaminati, con_linkedin, analizzati,
                                          importati, scartati_punteggio, senza_linkedin,
                                          fuori_zona, errori, costo, nota, dettaglio)
@@ -653,10 +654,13 @@ def _registra_run(esito: dict, stato: str) -> None:
              esito.get("nota", ""),
              _json.dumps(esito.get("dettaglio", []), ensure_ascii=False)[:4000]),
         )
+        nuovo_id = getattr(cur, "lastrowid", None)
         db.commit()
         db.close()
+        return nuovo_id
     except Exception as e:  # pragma: no cover
         logger.warning("Storico loop non registrato: %s", e)
+        return None
 
 
 def ultime_esecuzioni(quante: int = 10) -> list:

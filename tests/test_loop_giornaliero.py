@@ -40,7 +40,8 @@ class _finto_mondo:
     - Carla → su LinkedIn c'è, punteggio 4  → scartata dopo l'analisi
     """
 
-    def __init__(self, budget=None, sedi=None, ai_viva=None):
+    def __init__(self, budget=None, sedi=None, ai_viva=None, acceso=True):
+        self.acceso = acceso
         self.budget = budget or {"noto": True, "usato": 1.0, "tetto": 29.0, "residuo": 28.0}
         self.sedi = sedi or {}
         self.ai_viva = ai_viva or {"ok": True}
@@ -55,7 +56,12 @@ class _finto_mondo:
             "ai": ai_helpers.analizza_profilo_linkedin,
             "budget": loop_giornaliero.budget_apify,
             "ping": ai_helpers.test_connessione_api,
+            "attivo": loop_giornaliero.attivo,
         }
+        # L'interruttore vero sta nel database di produzione: il test non lo
+        # legge né lo tocca, così non dipende da come l'ha lasciato Stefano.
+        loop_giornaliero.attivo = lambda: prova_acceso
+        prova_acceso = self.acceso
         ai_helpers.test_connessione_api = lambda: self.ai_viva
         persone = _persone()
         prova = self
@@ -96,11 +102,33 @@ class _finto_mondo:
         ai_helpers.test_connessione_api = self._orig["ping"]
         ai_helpers.analizza_profilo_linkedin = self._orig["ai"]
         loop_giornaliero.budget_apify = self._orig["budget"]
+        loop_giornaliero.attivo = self._orig["attivo"]
         return False
 
 
+# Id delle righe di ocf_loop_run scritte DAI TEST: il giro vero può girare
+# nello stesso momento sullo stesso database, e le sue righe non si toccano.
+RUN_DEL_TEST = []
+
+
+def _traccia_run_del_test():
+    from services import loop_giornaliero as L
+    if getattr(L._registra_run, "_tracciato", False):
+        return
+    originale = L._registra_run
+
+    def registra(esito, stato):
+        nuovo = originale(esito, stato)
+        if nuovo:
+            RUN_DEL_TEST.append(nuovo)
+        return nuovo
+    registra._tracciato = True
+    L._registra_run = registra
+
+
 def _ultimo_id_storico() -> int:
-    """Id più alto in ocf_loop_run PRIMA del test: tutto ciò che nasce dopo è nostro."""
+    """Id più alto in ocf_loop_run prima del test (oggi serve solo ad attivare la traccia)."""
+    _traccia_run_del_test()
     from database import get_db
     db = get_db()
     try:
@@ -119,15 +147,16 @@ def _pulisci(da_id: int = None):
     somiglianza di testo — «tutte le righe che contengono Loop», «la nota che
     cita 28.5» — rischia di portarsi via storico vero, perché una nota reale
     può benissimo contenere quel numero. Si cancellano gli id nati dopo l'inizio
-    del test e i nominativi inventati, nient'altro.
+    del test e i nominativi inventati, nient'altro: per ocf_loop_run solo gli
+    id che il test stesso ha registrato, mai «tutto ciò che è dopo un id».
     """
     from database import get_db
     db = get_db()
     for c in COGNOMI_PROVA:
         db.execute("DELETE FROM candidati WHERE cognome = ?", (c,))
     db.execute("DELETE FROM ocf_dossier WHERE chiave IN ('loop_k1','loop_k2','loop_k3')")
-    if da_id is not None:
-        db.execute("DELETE FROM ocf_loop_run WHERE id > ?", (da_id,))
+    while RUN_DEL_TEST:
+        db.execute("DELETE FROM ocf_loop_run WHERE id = ?", (RUN_DEL_TEST.pop(),))
     db.commit()
     db.close()
 
@@ -404,15 +433,13 @@ def test_interruttore_spento_ferma_il_giro_automatico():
 
     da_id = _ultimo_id_storico()
     _pulisci(da_id)
-    prima = L.attivo()
     ricerche_fatte = []
     originale = L._raccogli_da_linkedin
     L._raccogli_da_linkedin = lambda q: (ricerche_fatte.append(1), ([], 1, 0))[1]
     try:
         # Il conteggio parte da quello che c'è già: oggi può esserci un giro vero.
         base = giri_che_contano()
-        L.imposta_attivo(False)
-        with _finto_mondo() as mondo:
+        with _finto_mondo(acceso=False) as mondo:
             r = L.esegui(limite=3)
         assert not r["ok"]
         assert "spento" in r["nota"].lower(), r["nota"]
@@ -426,7 +453,6 @@ def test_interruttore_spento_ferma_il_giro_automatico():
         assert ultima["stato"] == "saltata_spento", ultima
     finally:
         L._raccogli_da_linkedin = originale
-        L.imposta_attivo(prima)
         _pulisci(da_id)
 
 
@@ -439,15 +465,12 @@ def test_bottone_manuale_funziona_anche_a_interruttore_spento():
 
     da_id = _ultimo_id_storico()
     _pulisci(da_id)
-    prima = L.attivo()
     try:
-        L.imposta_attivo(False)
-        with _finto_mondo():
+        with _finto_mondo(acceso=False):
             r = L.esegui(limite=3, forzato=True)
         assert r["ok"], r
         assert r["importati"] == 1, r
     finally:
-        L.imposta_attivo(prima)
         _pulisci(da_id)
 
 
