@@ -666,11 +666,17 @@ def test_firdaous_cerca_solo_under_35_con_mandato_di_una_banca():
     assert db.sql.count("?") == len(db.valori)        # segnaposto e valori allineati
 
 
-def test_fideuram_non_e_mai_una_banca_di_firdaous():
+def test_il_gruppo_fideuram_e_escluso_da_entrambi_i_giri():
+    """Intesa Sanpaolo è lo stesso gruppo di Fideuram (Stefano, 25/11/2026)."""
     from services import loop_giornaliero as L
-    from services.albo_ocf import RETE_PROPRIA
-    assert RETE_PROPRIA not in L.BANCHE_CON_SPORTELLI
-    assert "rete <> ?" in _query_albo(L.FIRDAOUS).sql
+    from services.albo_ocf import GRUPPO_PROPRIO
+    assert {"Fideuram", "Intesa Sanpaolo", "Intesa Sanpaolo Private Banking"} <= set(GRUPPO_PROPRIO)
+    assert not set(GRUPPO_PROPRIO) & L.BANCHE_CON_SPORTELLI
+    for b in (L.SABIA, L.FIRDAOUS):
+        db = _query_albo(b)
+        assert "rete NOT IN (" in db.sql
+        assert all(g in db.valori for g in GRUPPO_PROPRIO)
+        assert db.sql.count("?") == len(db.valori)
 
 
 def test_il_giro_di_sabia_non_cambia():

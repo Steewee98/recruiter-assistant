@@ -9,17 +9,11 @@ from datetime import datetime
 
 from flask import Blueprint, render_template, jsonify, request, Response
 
-from services import commenti_linkedin
-
 from database import get_db
 
 log = logging.getLogger(__name__)
 
 dashboard_bp = Blueprint("dashboard", __name__)
-
-# In bacheca si mostrano solo i post dell'ultima settimana: più vecchi di così,
-# commentarli fa l'effetto di chi arriva in ritardo.
-GIORNI_IN_BACHECA = 7
 
 STATI = [
     "Da valutare",
@@ -120,18 +114,9 @@ def _get_stats():
 @dashboard_bp.route("/dashboard")
 def index():
     stats = _get_stats()
-    # I post da commentare stanno in bacheca perché Sabia entra qui per
-    # confermare i profili: trovandoli accanto, conferma anche i commenti senza
-    # dover passare da un'altra sezione. Solo l'ultima settimana, e solo quelli
-    # che hanno già una proposta scritta: una riga con «nessuna proposta» e un
-    # pulsante da aspettare un minuto qui non servirebbe a niente.
-    try:
-        da_commentare = commenti_linkedin.da_approvare(
-            limite=10, giorni=GIORNI_IN_BACHECA, solo_con_proposta=True)
-    except Exception as e:
-        log.warning("Post da commentare non caricati: %s", e)
-        da_commentare = []
-    return render_template("dashboard.html", stats=stats, da_commentare=da_commentare)
+    # Dal 25/11/2026 la bacheca non mostra più i post da commentare: al loro
+    # posto ci sono i candidati di Firdaous, accanto a quelli di Salvatore.
+    return render_template("dashboard.html", stats=stats)
 
 
 @dashboard_bp.route("/dashboard/stats")

@@ -399,6 +399,17 @@ def _registra_sync(esito: dict) -> None:
 # mandato. Usato quando il chiamante non specifica una rete.
 RETE_PROPRIA = "Fideuram"
 
+# Chi non si cerca mai per reclutare: Fideuram e il suo gruppo. Intesa Sanpaolo
+# e Intesa Sanpaolo Private Banking sono lo stesso gruppo di Fideuram
+# (indicazione di Stefano, 25/11/2026). Vale per le liste di chi contattare;
+# le statistiche sui movimenti «verso di noi» restano su RETE_PROPRIA.
+GRUPPO_PROPRIO = ("Fideuram", "Intesa Sanpaolo", "Intesa Sanpaolo Private Banking")
+
+
+def fuori_dal_gruppo(colonna: str = "rete"):
+    """Pezzo di SQL «non del nostro gruppo» e i suoi valori: (sql, lista)."""
+    return f"{colonna} NOT IN ({','.join(['?'] * len(GRUPPO_PROPRIO))})", list(GRUPPO_PROPRIO)
+
 # Provincia su cui SABIA lavora davvero. Le squadre in movimento vengono filtrate
 # qui: un gruppo che passa a Fideuram a Torino non è azionabile da questo ufficio.
 PROVINCIA_OPERATIVA = "RM"
@@ -484,8 +495,9 @@ def cerca(rete: str = "", comune: str = "", provincia: str = "", regione: str = 
         dove.append("LOWER(rete) LIKE LOWER(?)")
         par.append(f"%{rete.strip()}%")
     elif escludi_propria:
-        dove.append("rete <> ?")
-        par.append(RETE_PROPRIA)
+        pezzo, valori = fuori_dal_gruppo()
+        dove.append(pezzo)
+        par.extend(valori)
     if solo_con_rete:
         dove.append("COALESCE(rete, '') <> ''")
     if comune:

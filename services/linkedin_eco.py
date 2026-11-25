@@ -269,7 +269,8 @@ def profili_da_commentare(limite: int = 15) -> list:
     anno = date.today().year
     db = get_db()
     try:
-        righe = db.execute("""
+        fuori, gruppo = albo_ocf.fuori_dal_gruppo("i.rete")
+        righe = db.execute(f"""
             SELECT i.chiave, i.nome, i.cognome, i.rete, i.comune, i.anno_nascita,
                    d.linkedin_url,
                    (SELECT COUNT(*) FROM linkedin_interazioni li
@@ -277,13 +278,13 @@ def profili_da_commentare(limite: int = 15) -> list:
               FROM ocf_iscritti i
          LEFT JOIN ocf_dossier d ON d.chiave = i.chiave
              WHERE i.attivo = TRUE AND i.provincia = ?
-               AND COALESCE(i.rete,'') <> '' AND i.rete <> ?
+               AND COALESCE(i.rete,'') <> '' AND {fuori}
                AND i.anno_nascita IS NOT NULL
                AND i.chiave NOT IN (SELECT chiave FROM ocf_dossier WHERE esito = 'in_pipeline')
                AND NOT EXISTS (SELECT 1 FROM candidati c
                                 WHERE LOWER(c.nome) = LOWER(i.nome)
                                   AND LOWER(c.cognome) = LOWER(i.cognome))
-        """, (albo_ocf.PROVINCIA_OPERATIVA, albo_ocf.RETE_PROPRIA)).fetchall()
+        """, (albo_ocf.PROVINCIA_OPERATIVA, *gruppo)).fetchall()
     finally:
         db.close()
 

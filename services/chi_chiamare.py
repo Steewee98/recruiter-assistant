@@ -68,17 +68,18 @@ def genera(quanti: int = QUANTI) -> dict:
             # mandato in corso, non già nostri, non già lavorati (dossier) e non
             # già in pipeline. Chi è stato toccato non deve ricomparire: la
             # lista serve a dire «chi NON hai ancora chiamato».
-            righe = db.execute("""
+            fuori, gruppo = albo_ocf.fuori_dal_gruppo()
+            righe = db.execute(f"""
                 SELECT chiave, nome, cognome, anno_nascita, comune, provincia, rete
                   FROM ocf_iscritti
                  WHERE attivo = TRUE AND provincia = ?
-                   AND COALESCE(rete,'') <> '' AND rete <> ?
+                   AND COALESCE(rete,'') <> '' AND {fuori}
                    AND anno_nascita IS NOT NULL AND anno_nascita <= ?
                    AND chiave NOT IN (SELECT chiave FROM ocf_dossier)
                    AND NOT EXISTS (SELECT 1 FROM candidati c
                                     WHERE LOWER(c.nome) = LOWER(ocf_iscritti.nome)
                                       AND LOWER(c.cognome) = LOWER(ocf_iscritti.cognome))
-            """, (albo_ocf.PROVINCIA_OPERATIVA, albo_ocf.RETE_PROPRIA,
+            """, (albo_ocf.PROVINCIA_OPERATIVA, *gruppo,
                   date.today().year - ETA_MINIMA)).fetchall()
         finally:
             db.close()

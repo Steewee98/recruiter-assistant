@@ -104,11 +104,12 @@ LUCCHETTO_LOOP = 918273646
 
 # Mandanti dell'albo che sono banche con dipendenti allo sportello, non reti di
 # consulenti. L'albo OCF non distingue: la lista è nostra, con i nomi scritti
-# esattamente come li normalizza albo_ocf. Fideuram non c'è apposta.
-# Dubbi aperti (25/11): ING Bank e Mediobanca Premier hanno anche venditori
-# fuori sede; Intesa Sanpaolo è lo stesso gruppo di Fideuram.
+# esattamente come li normalizza albo_ocf. Fideuram e Intesa Sanpaolo non ci
+# sono apposta: sono il nostro gruppo (albo_ocf.GRUPPO_PROPRIO).
+# Dubbio aperto (25/11): ING Bank e Mediobanca Premier hanno anche venditori
+# fuori sede.
 BANCHE_CON_SPORTELLI = frozenset({
-    "Intesa Sanpaolo", "Intesa Sanpaolo Private Banking", "UniCredit",
+    "UniCredit",
     "BNL BNP Paribas", "Poste Italiane", "Credito Emiliano", "Credem Euromobiliare",
     "Credit Agricole Italia", "Banca MPS", "BPER Banca", "Banco Bpm",
     "Deutsche Bank", "Mediobanca Premier", "Ing Bank N V",
@@ -578,14 +579,17 @@ def _cerca_nellalbo(nome: str, cognome: str, bersaglio: Bersaglio = SABIA):
     """
     Cerca il nominativo nell'albo con i criteri del bersaglio: provincia
     operativa, età nei limiti, con mandato (per Firdaous: di una banca con
-    sportelli), mai Fideuram, non già lavorato né in pipeline.
+    sportelli), mai del nostro gruppo (Fideuram, Intesa Sanpaolo), non già
+    lavorato né in pipeline.
     Ritorna la riga pronta all'uso oppure None.
     """
     nome, cognome = (nome or "").strip(), (cognome or "").strip()
     if not nome or not cognome:
         return None
     anno = date.today().year
-    filtri, valori = [], [PROVINCIA, albo_rete_propria(), nome, cognome]
+    from services.albo_ocf import fuori_dal_gruppo
+    fuori, gruppo = fuori_dal_gruppo()
+    filtri, valori = [], [PROVINCIA, *gruppo, nome, cognome]
     if bersaglio.eta_minima:
         filtri.append("AND anno_nascita <= ?")      # almeno eta_minima anni
         valori.append(anno - bersaglio.eta_minima)
@@ -601,7 +605,7 @@ def _cerca_nellalbo(nome: str, cognome: str, bersaglio: Bersaglio = SABIA):
         r = db.execute(f"""
             SELECT chiave, nome, cognome, anno_nascita, comune, provincia, rete, n_cambi
               FROM ocf_iscritti
-             WHERE attivo = TRUE AND provincia = ? AND COALESCE(rete,'') <> '' AND rete <> ?
+             WHERE attivo = TRUE AND provincia = ? AND COALESCE(rete,'') <> '' AND {fuori}
                AND LOWER(nome) = LOWER(?) AND LOWER(cognome) = LOWER(?)
                AND anno_nascita IS NOT NULL {' '.join(filtri)}
                AND chiave NOT IN (SELECT chiave FROM ocf_dossier)
