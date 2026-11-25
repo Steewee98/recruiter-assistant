@@ -116,19 +116,21 @@ def _pianificatore():
         except Exception as e:  # pragma: no cover
             log.warning("Classifica «chi chiamare»: %s", e)
 
-        # Giro giornaliero: porta nuovi consulenti in «Da valutare».
-        try:
-            if (os.environ.get("LOOP_GIORNALIERO", "1") == "1"
-                    and loop_giornaliero.attivo()
-                    and not loop_giornaliero.gia_eseguito_oggi()):
-                log.info("Loop giornaliero: avvio")
-                esito = loop_giornaliero.esegui()
-                log.info("Loop giornaliero: %s — importati %s su %s esaminati (%s)",
-                         "ok" if esito.get("ok") else "saltato",
-                         esito.get("importati"), esito.get("esaminati"),
-                         esito.get("nota") or "")
-        except Exception as e:  # pragma: no cover
-            log.warning("Loop giornaliero: %s", e)
+        # Giri giornalieri: portano nuovi nomi in «Da valutare», uno per
+        # Salvatore e uno per Firdaous. Uno che fallisce non ferma l'altro.
+        for bersaglio in loop_giornaliero.BERSAGLI.values():
+            try:
+                if (os.environ.get("LOOP_GIORNALIERO", "1") == "1"
+                        and loop_giornaliero.attivo()
+                        and not loop_giornaliero.gia_eseguito_oggi(bersaglio)):
+                    log.info("Loop giornaliero (%s): avvio", bersaglio.codice)
+                    esito = loop_giornaliero.esegui(bersaglio=bersaglio)
+                    log.info("Loop giornaliero (%s): %s — importati %s su %s esaminati (%s)",
+                             bersaglio.codice, "ok" if esito.get("ok") else "saltato",
+                             esito.get("importati"), esito.get("esaminati"),
+                             esito.get("nota") or "")
+            except Exception as e:  # pragma: no cover
+                log.warning("Loop giornaliero (%s): %s", bersaglio.codice, e)
 
         time.sleep(CONTROLLO_OGNI_SECONDI)
 
@@ -168,7 +170,7 @@ def index():
     return render_template("albo.html", stats=stats, movimenti=ultimi_movimenti,
                            squadre=squadre, squadre_nuove=nuove,
                            da_chiamare=chi_chiamare.leggi(50),
-                           loop_esecuzioni=loop_giornaliero.ultime_esecuzioni(5),
+                           loop_esecuzioni=loop_giornaliero.ultime_esecuzioni(10),
                            loop_attivo=loop_giornaliero.attivo(),
                            loop_conf={"provincia": loop_giornaliero.PROVINCIA,
                                       "eta": loop_giornaliero.ETA_MINIMA - 1,
@@ -508,8 +510,12 @@ def loop_adesso():
     def _lavora():
         _loop_stato["in_corso"] = True
         try:
-            _loop_stato["esito"] = loop_giornaliero.esegui(ignora_budget=forza,
-                                                           forzato=True)
+            # Entrambi i giri, uno dopo l'altro. A schermo resta l'esito di
+            # quello di Salvatore (il riquadro ne mostra uno); quello di
+            # Firdaous finisce nello storico come ogni giro.
+            esiti = [loop_giornaliero.esegui(ignora_budget=forza, forzato=True, bersaglio=b)
+                     for b in loop_giornaliero.BERSAGLI.values()]
+            _loop_stato["esito"] = esiti[0]
         except Exception as e:  # pragma: no cover
             log.error("Loop manuale fallito: %s", e, exc_info=True)
             _loop_stato["esito"] = {"ok": False, "nota": str(e)}

@@ -500,6 +500,8 @@ def init_db():
         # Costo Apify effettivo del giro (differenza di consumo prima/dopo): la
         # convenienza della ricerca a gruppi va misurata, non solo prevista.
         "ALTER TABLE ocf_loop_run ADD COLUMN IF NOT EXISTS costo NUMERIC(10,4)",
+        # Per chi è il giro (dal 25/11/2026: "sabia" o "firdaous")
+        "ALTER TABLE ocf_loop_run ADD COLUMN IF NOT EXISTS bersaglio TEXT DEFAULT 'sabia'",
         # ── Interazioni LinkedIn ricondotte all'albo ──────────────────────
         # Serve a rispondere all'unica domanda che conta sui contenuti: fra chi
         # ha reagito a un post, quanti sono consulenti del nostro bacino? Le

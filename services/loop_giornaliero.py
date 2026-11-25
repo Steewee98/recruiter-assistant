@@ -50,6 +50,7 @@ import logging
 import os
 import re
 import unicodedata
+from dataclasses import dataclass
 from datetime import date
 
 import requests
@@ -93,6 +94,57 @@ RISERVA_BUDGET_USD = 2.0
 # suo pianificatore. Senza, due processi potrebbero lanciare lo stesso giro e
 # pagare due volte le stesse ricerche.
 LUCCHETTO_LOOP = 918273646
+
+
+# ── Per chi si cerca ─────────────────────────────────────────────────────────
+# Dal 25/11/2026 i giri sono due: quello storico per Salvatore Sabia (consulenti
+# di rete, sopra i 30 anni) e uno per Firdaous Filahi (under 35 che lavorano in
+# banca). Cambiano ruoli, filtri sull'albo e gestore; ricerca, analisi,
+# registro e freni sul budget restano in comune.
+
+# Mandanti dell'albo che sono banche con dipendenti allo sportello, non reti di
+# consulenti. L'albo OCF non distingue: la lista è nostra, con i nomi scritti
+# esattamente come li normalizza albo_ocf. Fideuram non c'è apposta.
+# Dubbi aperti (25/11): ING Bank e Mediobanca Premier hanno anche venditori
+# fuori sede; Intesa Sanpaolo è lo stesso gruppo di Fideuram.
+BANCHE_CON_SPORTELLI = frozenset({
+    "Intesa Sanpaolo", "Intesa Sanpaolo Private Banking", "UniCredit",
+    "BNL BNP Paribas", "Poste Italiane", "Credito Emiliano", "Credem Euromobiliare",
+    "Credit Agricole Italia", "Banca MPS", "BPER Banca", "Banco Bpm",
+    "Deutsche Bank", "Mediobanca Premier", "Ing Bank N V",
+    "Banco Di Desio E Della Brianza", "Banco Di Sardegna",
+})
+
+# I titoli con cui si presentano su LinkedIn i giovani di filiale.
+RUOLI_FIRDAOUS = [
+    "gestore clienti", "gestore affluent", "personal banker", "gestore privati",
+    "consulente finanziario", "private banker", "relationship manager",
+    "consulente investimenti",
+]
+
+
+@dataclass(frozen=True)
+class Bersaglio:
+    codice: str             # scritto nello storico dei giri
+    gestore: str            # "" = deciso dall'età (regola storica del giro di Sabia)
+    ruoli: tuple
+    eta_minima: int = 0     # 0 = nessun limite
+    eta_massima: int = 0    # 0 = nessun limite
+    banche: frozenset = frozenset()   # vuoto = qualunque mandante tranne Fideuram
+    lucchetto: int = LUCCHETTO_LOOP
+    chi: str = ""           # per la nota «nessuno nuovo che …»
+
+
+SABIA = Bersaglio(
+    codice="sabia", gestore="", ruoli=tuple(RUOLI_LINKEDIN),
+    eta_minima=ETA_MINIMA, chi="nell'albo di Roma sopra i 30 anni",
+)
+FIRDAOUS = Bersaglio(
+    codice="firdaous", gestore="Firdaous Filahi", ruoli=tuple(RUOLI_FIRDAOUS),
+    eta_massima=34, banche=BANCHE_CON_SPORTELLI, lucchetto=LUCCHETTO_LOOP + 1,
+    chi="nell'albo di Roma, sotto i 35 anni e con mandato di una banca",
+)
+BERSAGLI = {b.codice: b for b in (SABIA, FIRDAOUS)}
 
 
 _comuni_rm = {"roma", "rome"}
@@ -264,15 +316,16 @@ def imposta_attivo(nuovo_stato: bool) -> bool:
     return bool(nuovo_stato)
 
 
-def gia_eseguito_oggi() -> bool:
+def gia_eseguito_oggi(bersaglio: Bersaglio = SABIA) -> bool:
     db = get_db()
     try:
         segnaposto = ",".join(["?"] * len(ESITI_CHE_CONTANO))
         r = db.execute(
             f"""SELECT COUNT(*) AS n FROM ocf_loop_run
                  WHERE DATE(eseguito_il) = CURRENT_DATE
+                   AND COALESCE(bersaglio, 'sabia') = ?
                    AND stato IN ({segnaposto})""",
-            list(ESITI_CHE_CONTANO),
+            [bersaglio.codice, *ESITI_CHE_CONTANO],
         ).fetchone()
         return (r or {}).get("n", 0) > 0
     except Exception:
@@ -282,7 +335,7 @@ def gia_eseguito_oggi() -> bool:
 
 
 def esegui(limite: int = AL_GIORNO, ignora_budget: bool = False,
-           forzato: bool = False) -> dict:
+           forzato: bool = False, bersaglio: Bersaglio = SABIA) -> dict:
     """
     Un giro completo. Non solleva: ogni errore finisce nel riepilogo e nella
     riga di storico.
@@ -298,12 +351,12 @@ def esegui(limite: int = AL_GIORNO, ignora_budget: bool = False,
              "importati": 0, "scartati_punteggio": 0, "senza_linkedin": 0,
              "fuori_zona": 0, "errori": 0, "dettaglio": [], "nota": "", "budget": None,
              "costo": None, "costo_per_persona": None,
-             "ricerche": 0, "profili_linkedin": 0}
+             "ricerche": 0, "profili_linkedin": 0, "bersaglio": bersaglio.codice}
 
     # 0) Un giro alla volta, anche fra processi diversi
     conn = _get_raw_connection()
     cur = conn.cursor()
-    cur.execute("SELECT pg_try_advisory_lock(%s) AS ottenuto", (LUCCHETTO_LOOP,))
+    cur.execute("SELECT pg_try_advisory_lock(%s) AS ottenuto", (bersaglio.lucchetto,))
     if not cur.fetchone()["ottenuto"]:
         cur.close()
         conn.close()
@@ -311,10 +364,10 @@ def esegui(limite: int = AL_GIORNO, ignora_budget: bool = False,
         return esito
 
     try:
-        return _esegui_protetto(esito, limite, ignora_budget, forzato)
+        return _esegui_protetto(esito, limite, ignora_budget, forzato, bersaglio)
     finally:
         try:
-            cur.execute("SELECT pg_advisory_unlock(%s)", (LUCCHETTO_LOOP,))
+            cur.execute("SELECT pg_advisory_unlock(%s)", (bersaglio.lucchetto,))
         except Exception:
             pass
         cur.close()
@@ -322,7 +375,7 @@ def esegui(limite: int = AL_GIORNO, ignora_budget: bool = False,
 
 
 def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool,
-                     forzato: bool = False) -> dict:
+                     forzato: bool = False, bersaglio: Bersaglio = SABIA) -> dict:
     from services import albo_ocf, dossier_albo
 
     # 0-bis) Interruttore: è il primo controllo perché è l'unico gratis. Spento
@@ -360,7 +413,7 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool,
     #    venticinque persone invece di una.
     usato_prima = b.get("usato") if b.get("noto") else None
     try:
-        candidati, ricerche, visti = _raccogli_da_linkedin(limite)
+        candidati, ricerche, visti = _raccogli_da_linkedin(limite, bersaglio)
     except Exception as e:
         logger.error("Loop: raccolta da LinkedIn fallita: %s", e, exc_info=True)
         esito["nota"] = f"Ricerca LinkedIn non riuscita: {e}"
@@ -374,7 +427,7 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool,
     if not candidati:
         esito["ok"] = True
         esito["nota"] = (f"{visti} profili LinkedIn esaminati in {ricerche} ricerche, "
-                         "nessuno nuovo che risulti anche nell'albo di Roma sopra i 30 anni.")
+                         f"nessuno nuovo che risulti anche {bersaglio.chi}.")
         _registra_run(esito, stato="nulla_da_fare")
         return esito
 
@@ -392,7 +445,7 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool,
             continue
 
         try:
-            analisi = _analizza(p, li)
+            analisi = _analizza(p, li, bersaglio)
         except Exception as e:
             from ai_helpers import messaggio_errore_ai
             logger.error("Loop: analisi fallita per %s: %s", p["nome_completo"], e)
@@ -419,7 +472,7 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool,
                                        "motivo": f"punteggio {punteggio}"})
             continue
 
-        cid, come = _importa(p, li, analisi)
+        cid, come = _importa(p, li, analisi, bersaglio)
         if come == "ok":
             esito["importati"] += 1
             albo_ocf.registra_dossier(p, linkedin_url=url, esito="in_pipeline",
@@ -446,12 +499,12 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool,
 
     esito["ok"] = True
     _registra_run(esito, stato="completata")
-    logger.info("Loop giornaliero: %d esaminati, %d con LinkedIn, %d importati",
-                esito["esaminati"], esito["con_linkedin"], esito["importati"])
+    logger.info("Loop giornaliero (%s): %d esaminati, %d con LinkedIn, %d importati",
+                bersaglio.codice, esito["esaminati"], esito["con_linkedin"], esito["importati"])
     return esito
 
 
-def ricerche_del_giorno(giorno: int) -> list:
+def ricerche_del_giorno(giorno: int, ruoli=None) -> list:
     """
     Le coppie (ruolo, pagina di partenza) da usare nel giro del giorno `giorno`
     (date.toordinal()), nell'ordine in cui provarle.
@@ -461,16 +514,16 @@ def ricerche_del_giorno(giorno: int) -> list:
     all'altro, così tre ricerche su quattro erano identiche a quelle della notte
     prima: si pagavano profili già visti (log Railway del 3-4/11/2026).
     """
-    combinazioni = [(r, p) for p in PARTENZE for r in RUOLI_LINKEDIN]
+    combinazioni = [(r, p) for p in PARTENZE for r in (ruoli or RUOLI_LINKEDIN)]
     inizio = giorno * MAX_RICERCHE
     return [combinazioni[(inizio + t) % len(combinazioni)] for t in range(MAX_RICERCHE)]
 
 
-def _raccogli_da_linkedin(quanti: int):
+def _raccogli_da_linkedin(quanti: int, bersaglio: Bersaglio = SABIA):
     """
-    Cerca su LinkedIn consulenti con sede a Roma e tiene solo quelli che
-    risultano anche nell'albo, in provincia di Roma, sopra i 30 anni, con un
-    mandato e non già in Fideuram.
+    Cerca su LinkedIn, con i ruoli del bersaglio, persone con sede a Roma e
+    tiene solo quelle che risultano anche nell'albo con i criteri del bersaglio
+    (vedi _cerca_nellalbo).
 
     Ritorna (candidati_ordinati_per_propensione, n_ricerche, n_profili_visti).
     Ogni candidato porta con sé il profilo LinkedIn in "_linkedin".
@@ -484,7 +537,7 @@ def _raccogli_da_linkedin(quanti: int):
     candidati, visti, ricerche = [], 0, 0
     gia_presi, errori = set(), []
 
-    for ruolo, pagina in ricerche_del_giorno(giorno):
+    for ruolo, pagina in ricerche_del_giorno(giorno, bersaglio.ruoli):
         if len(candidati) >= quanti:
             break
         items, errore = cerca_apify(
@@ -503,7 +556,7 @@ def _raccogli_da_linkedin(quanti: int):
             if not isinstance(item, dict):
                 continue
             li = normalizza_profilo(item)
-            riga = _cerca_nellalbo(li.get("nome", ""), li.get("cognome", ""))
+            riga = _cerca_nellalbo(li.get("nome", ""), li.get("cognome", ""), bersaglio)
             if not riga or riga["chiave"] in gia_presi:
                 continue
             gia_presi.add(riga["chiave"])
@@ -521,30 +574,42 @@ def _raccogli_da_linkedin(quanti: int):
     return candidati[:quanti], ricerche, visti
 
 
-def _cerca_nellalbo(nome: str, cognome: str):
+def _cerca_nellalbo(nome: str, cognome: str, bersaglio: Bersaglio = SABIA):
     """
-    Cerca il nominativo nell'albo con i criteri del giro: provincia operativa,
-    sopra l'età minima, con mandato, non Fideuram, non già lavorato né in
-    pipeline. Ritorna la riga pronta all'uso oppure None.
+    Cerca il nominativo nell'albo con i criteri del bersaglio: provincia
+    operativa, età nei limiti, con mandato (per Firdaous: di una banca con
+    sportelli), mai Fideuram, non già lavorato né in pipeline.
+    Ritorna la riga pronta all'uso oppure None.
     """
     nome, cognome = (nome or "").strip(), (cognome or "").strip()
     if not nome or not cognome:
         return None
-    anno_limite = date.today().year - ETA_MINIMA
+    anno = date.today().year
+    filtri, valori = [], [PROVINCIA, albo_rete_propria(), nome, cognome]
+    if bersaglio.eta_minima:
+        filtri.append("AND anno_nascita <= ?")      # almeno eta_minima anni
+        valori.append(anno - bersaglio.eta_minima)
+    if bersaglio.eta_massima:
+        filtri.append("AND anno_nascita >= ?")      # al massimo eta_massima anni
+        valori.append(anno - bersaglio.eta_massima)
+    if bersaglio.banche:
+        banche = sorted(bersaglio.banche)
+        filtri.append(f"AND rete IN ({','.join(['?'] * len(banche))})")
+        valori.extend(banche)
     db = get_db()
     try:
-        r = db.execute("""
+        r = db.execute(f"""
             SELECT chiave, nome, cognome, anno_nascita, comune, provincia, rete, n_cambi
               FROM ocf_iscritti
              WHERE attivo = TRUE AND provincia = ? AND COALESCE(rete,'') <> '' AND rete <> ?
                AND LOWER(nome) = LOWER(?) AND LOWER(cognome) = LOWER(?)
-               AND anno_nascita IS NOT NULL AND anno_nascita <= ?
+               AND anno_nascita IS NOT NULL {' '.join(filtri)}
                AND chiave NOT IN (SELECT chiave FROM ocf_dossier)
                AND NOT EXISTS (SELECT 1 FROM candidati c
                                 WHERE LOWER(c.nome) = LOWER(ocf_iscritti.nome)
                                   AND LOWER(c.cognome) = LOWER(ocf_iscritti.cognome))
              LIMIT 1
-        """, (PROVINCIA, albo_rete_propria(), nome, cognome, anno_limite)).fetchone()
+        """, valori).fetchone()
     finally:
         db.close()
     if not r:
@@ -560,13 +625,26 @@ def albo_rete_propria() -> str:
     return RETE_PROPRIA
 
 
-def _analizza(profilo: dict, linkedin: dict) -> dict:
-    """Analisi AI con il profilo di ricerca adatto all'età (B = under 35)."""
+def _tipo(profilo: dict, bersaglio: Bersaglio) -> str:
+    """Profilo di ricerca: B = under 35 (sempre B nel giro di Firdaous)."""
+    if bersaglio.gestore == "Firdaous Filahi":
+        return "B"
+    eta = profilo.get("eta") or 0
+    return "B" if eta and eta < 35 else "A"
+
+
+def _gestore(tipo: str, bersaglio: Bersaglio) -> str:
+    if bersaglio.gestore:
+        return bersaglio.gestore
+    return "Salvatore Sabia" if tipo == "A" else "Firdaous Filahi"
+
+
+def _analizza(profilo: dict, linkedin: dict, bersaglio: Bersaglio = SABIA) -> dict:
+    """Analisi AI con il profilo di ricerca adatto (B = under 35)."""
     from ai_helpers import analizza_profilo_linkedin
     from routes.albo import _testo_per_analisi
 
-    eta = profilo.get("eta") or 0
-    tipo = "B" if eta and eta < 35 else "A"
+    tipo = _tipo(profilo, bersaglio)
     db = get_db()
     try:
         imp = db.execute("SELECT * FROM impostazioni_profilo WHERE profilo = ?",
@@ -580,7 +658,7 @@ def _analizza(profilo: dict, linkedin: dict) -> dict:
     return analizza_profilo_linkedin(testo, tipo, imp)
 
 
-def _importa(profilo: dict, linkedin: dict, analisi: dict):
+def _importa(profilo: dict, linkedin: dict, analisi: dict, bersaglio: Bersaglio = SABIA):
     """
     Inserisce il candidato in «Da valutare».
     Ritorna (id, esito) con esito in {"ok", "duplicato", "errore"}.
@@ -597,8 +675,7 @@ def _importa(profilo: dict, linkedin: dict, analisi: dict):
 
     from dedup import is_duplicate
 
-    eta = profilo.get("eta") or 0
-    tipo = "B" if eta and eta < 35 else "A"
+    tipo = _tipo(profilo, bersaglio)
     url = linkedin.get("linkedin", "")
     db = get_db()
     try:
@@ -612,6 +689,8 @@ def _importa(profilo: dict, linkedin: dict, analisi: dict):
         prop = profilo.get("propensione") or {}
         citta = ", ".join(x for x in [profilo.get("comune", ""), profilo.get("provincia", "")] if x)
         note = f"Trovato dal loop giornaliero · albo OCF · {citta}"
+        if bersaglio.gestore:
+            note += f" · giro di {bersaglio.gestore.split()[0]}"
         if prop.get("indice"):
             note += f" · propensione {prop['indice']}x la media"
         spunti = analisi.get("spunti_contatto") or []
@@ -627,7 +706,7 @@ def _importa(profilo: dict, linkedin: dict, analisi: dict):
              analisi.get("punteggio"), analisi.get("analisi_percorso") or "",
              _json.dumps(spunti if isinstance(spunti, list) else [], ensure_ascii=False),
              analisi.get("messaggio_outreach") or "", url,
-             "Salvatore Sabia" if tipo == "A" else "Firdaous Filahi"),
+             _gestore(tipo, bersaglio)),
         )
         db.commit()
         return cur.lastrowid, "ok"
@@ -646,13 +725,15 @@ def _registra_run(esito: dict, stato: str):
         cur = db.execute(
             """INSERT INTO ocf_loop_run (stato, esaminati, con_linkedin, analizzati,
                                          importati, scartati_punteggio, senza_linkedin,
-                                         fuori_zona, errori, costo, nota, dettaglio)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                         fuori_zona, errori, costo, nota, dettaglio,
+                                         bersaglio)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (stato, esito["esaminati"], esito["con_linkedin"], esito["analizzati"],
              esito["importati"], esito["scartati_punteggio"], esito["senza_linkedin"],
              esito.get("fuori_zona", 0), esito["errori"], esito.get("costo"),
              esito.get("nota", ""),
-             _json.dumps(esito.get("dettaglio", []), ensure_ascii=False)[:4000]),
+             _json.dumps(esito.get("dettaglio", []), ensure_ascii=False)[:4000],
+             esito.get("bersaglio") or "sabia"),
         )
         nuovo_id = getattr(cur, "lastrowid", None)
         db.commit()

@@ -198,13 +198,14 @@
         <div id="loop-storico">
         {% if loop_esecuzioni %}
         <table class="p-tabella">
-            <thead><tr><th>Quando</th><th>Esito</th><th>Esaminati</th><th>Con LinkedIn</th>
+            <thead><tr><th>Quando</th><th>Per</th><th>Esito</th><th>Esaminati</th><th>Con LinkedIn</th>
                        <th>Fuori Roma</th><th>Importati</th><th>Scartati</th>
                        <th>Costo</th><th>Nota</th></tr></thead>
             <tbody>
             {% for e in loop_esecuzioni %}
                 <tr>
                     <td class="p-numerico">{{ (e.eseguito_il or '')[:16] }}</td>
+                    <td>{{ 'Firdaous' if e.bersaglio == 'firdaous' else 'Salvatore' }}</td>
                     <td>
                         {% if e.stato == 'completata' %}<span class="p-pillola p-pillola--verde">completata</span>
                         {% elif e.stato.startswith('saltata') %}<span class="p-pillola p-pillola--ambra">{{ e.stato.replace('_', ' ') }}</span>

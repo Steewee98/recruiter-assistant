@@ -68,7 +68,7 @@ class _finto_mondo:
 
         # LinkedIn restituisce i tre profili (Bruno non c'è: simula chi su
         # LinkedIn non compare affatto)
-        def raccolta(quanti):
+        def raccolta(quanti, bersaglio=None):
             fuori = []
             for p in persone:
                 if p["cognome"] == "Loopdue":
@@ -314,7 +314,7 @@ def test_non_spende_in_ricerche_se_lai_e_giu():
     _pulisci(da_id)
     ricerche_fatte = []
     originale = L._raccogli_da_linkedin
-    L._raccogli_da_linkedin = lambda q: (ricerche_fatte.append(1), ([], 1, 0))[1]
+    L._raccogli_da_linkedin = lambda q, *b: (ricerche_fatte.append(1), ([], 1, 0))[1]
     try:
         with _finto_mondo(ai_viva={"ok": False, "errore": "credit balance is too low"}):
             r = L.esegui(limite=10)
@@ -337,7 +337,7 @@ def test_errore_di_salvataggio_non_marca_il_candidato_come_gia_presente():
     da_id = _ultimo_id_storico()
     _pulisci(da_id)
     originale = L._importa
-    L._importa = lambda p, li, a: (None, "errore")
+    L._importa = lambda p, li, a, *b: (None, "errore")
     try:
         with _finto_mondo():
             r = L.esegui(limite=3)
@@ -435,7 +435,7 @@ def test_interruttore_spento_ferma_il_giro_automatico():
     _pulisci(da_id)
     ricerche_fatte = []
     originale = L._raccogli_da_linkedin
-    L._raccogli_da_linkedin = lambda q: (ricerche_fatte.append(1), ([], 1, 0))[1]
+    L._raccogli_da_linkedin = lambda q, *b: (ricerche_fatte.append(1), ([], 1, 0))[1]
     try:
         # Il conteggio parte da quello che c'è già: oggi può esserci un giro vero.
         base = giri_che_contano()
@@ -522,7 +522,7 @@ def test_ogni_ricerca_chiede_tre_pagine_e_partenze_diverse():
     chiamate = []
     orig_cerca, orig_albo = R.cerca_apify, L._cerca_nellalbo
     R.cerca_apify = lambda **kw: (chiamate.append(kw), ([], None))[1]
-    L._cerca_nellalbo = lambda n, c: None
+    L._cerca_nellalbo = lambda n, c, *b: None
     try:
         _, ricerche, _ = L._raccogli_da_linkedin(10)
     finally:
@@ -619,3 +619,108 @@ if __name__ == "__main__":
             falliti += 1
     print(f"\n{passati} passati, {falliti} falliti")
     sys.exit(1 if falliti else 0)
+
+
+# ── Giro di Firdaous (dal 25/11/2026) ────────────────────────────────────────
+# Prove senza database: controllano i criteri, non i dati.
+
+class _DbFinto:
+    """Registra la query di _cerca_nellalbo invece di eseguirla."""
+    def __init__(self):
+        self.sql, self.valori = "", []
+
+    def execute(self, sql, valori=()):
+        self.sql, self.valori = sql, list(valori)
+        return self
+
+    def fetchone(self):
+        return None
+
+    def close(self):
+        pass
+
+
+def _query_albo(bersaglio):
+    from services import loop_giornaliero as L
+    db = _DbFinto()
+    orig = L.get_db
+    L.get_db = lambda: db
+    try:
+        L._cerca_nellalbo("Anna", "Rossi", bersaglio)
+    finally:
+        L.get_db = orig
+    return db
+
+
+def test_firdaous_cerca_solo_under_35_con_mandato_di_una_banca():
+    from datetime import date
+    from services import loop_giornaliero as L
+
+    db = _query_albo(L.FIRDAOUS)
+    anno = date.today().year
+    assert "anno_nascita >= ?" in db.sql and (anno - 34) in db.valori
+    assert "anno_nascita <= ?" not in db.sql          # nessuna età minima
+    assert "rete IN (" in db.sql
+    for banca in L.BANCHE_CON_SPORTELLI:
+        assert banca in db.valori
+    assert db.sql.count("?") == len(db.valori)        # segnaposto e valori allineati
+
+
+def test_fideuram_non_e_mai_una_banca_di_firdaous():
+    from services import loop_giornaliero as L
+    from services.albo_ocf import RETE_PROPRIA
+    assert RETE_PROPRIA not in L.BANCHE_CON_SPORTELLI
+    assert "rete <> ?" in _query_albo(L.FIRDAOUS).sql
+
+
+def test_il_giro_di_sabia_non_cambia():
+    """Stessi criteri di prima del 25/11: sopra i 30 anni, qualunque mandato tranne Fideuram."""
+    from datetime import date
+    from services import loop_giornaliero as L
+
+    db = _query_albo(L.SABIA)
+    assert "anno_nascita <= ?" in db.sql and (date.today().year - L.ETA_MINIMA) in db.valori
+    assert "anno_nascita >= ?" not in db.sql and "rete IN (" not in db.sql
+    assert db.sql.count("?") == len(db.valori)
+    assert L.ricerche_del_giorno(800001) == L.ricerche_del_giorno(800001, L.RUOLI_LINKEDIN)
+
+
+def test_le_ricerche_di_firdaous_usano_solo_i_suoi_ruoli():
+    from services import loop_giornaliero as L
+    viste = {r for g in range(800000, 800050) for r, _ in L.ricerche_del_giorno(g, L.FIRDAOUS.ruoli)}
+    assert viste == set(L.RUOLI_FIRDAOUS)
+
+
+def test_gestore_e_profilo_per_bersaglio():
+    from services import loop_giornaliero as L
+    # Firdaous: sempre profilo B e sempre sua, anche se l'età mancasse
+    for eta in (None, 25, 34):
+        t = L._tipo({"eta": eta}, L.FIRDAOUS)
+        assert t == "B" and L._gestore(t, L.FIRDAOUS) == "Firdaous Filahi"
+    # Sabia: la regola di sempre, decide l'età
+    assert L._gestore(L._tipo({"eta": 50}, L.SABIA), L.SABIA) == "Salvatore Sabia"
+    assert L._gestore(L._tipo({"eta": 32}, L.SABIA), L.SABIA) == "Firdaous Filahi"
+
+
+def test_i_due_giri_hanno_lucchetti_diversi():
+    """Con lo stesso lucchetto il secondo giro risulterebbe «già in corso» e salterebbe."""
+    from services import loop_giornaliero as L
+    assert len({b.lucchetto for b in L.BERSAGLI.values()}) == len(L.BERSAGLI)
+    assert len({b.codice for b in L.BERSAGLI.values()}) == len(L.BERSAGLI)
+
+
+def test_la_raccolta_passa_il_bersaglio_all_albo():
+    import routes.ricerca as R
+    from services import loop_giornaliero as L
+
+    visti_bersagli, ruoli = [], []
+    orig_cerca, orig_albo = R.cerca_apify, L._cerca_nellalbo
+    R.cerca_apify = lambda **kw: (ruoli.append(kw["ruolo"]),
+                                  ([{"firstName": "Anna", "lastName": "Rossi"}], None))[1]
+    L._cerca_nellalbo = lambda n, c, b=None: (visti_bersagli.append(b), None)[1]
+    try:
+        L._raccogli_da_linkedin(10, L.FIRDAOUS)
+    finally:
+        R.cerca_apify, L._cerca_nellalbo = orig_cerca, orig_albo
+    assert visti_bersagli and all(b is L.FIRDAOUS for b in visti_bersagli)
+    assert ruoli and set(ruoli) <= set(L.RUOLI_FIRDAOUS)
