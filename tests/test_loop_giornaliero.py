@@ -298,7 +298,10 @@ def test_riconoscimento_sede_romana():
     assert lavora_a_roma("Rome Metropolitan Area")
     assert lavora_a_roma("Frascati, Lazio, Italy"), "i comuni della provincia valgono"
     assert not lavora_a_roma("Milan, Lombardy, Italy")
-    assert not lavora_a_roma("Lazio, Italia"), "la sola regione non basta"
+    assert lavora_a_roma("Lazio, Italia"), "dal 25/11 la zona è tutto il Lazio"
+    assert lavora_a_roma("Latina, Lazio, Italy"), "le province intorno valgono"
+    assert lavora_a_roma("Viterbo, Italy")
+    assert not lavora_a_roma("Terni, Umbria, Italy"), "fuori dal Lazio no"
     assert not lavora_a_roma(""), "sede vuota non è una conferma"
     assert not lavora_a_roma(None)
 
@@ -652,13 +655,13 @@ def _query_albo(bersaglio):
     return db
 
 
-def test_firdaous_cerca_solo_under_35_con_mandato_di_una_banca():
+def test_firdaous_cerca_solo_under_45_con_mandato_di_una_banca():
     from datetime import date
     from services import loop_giornaliero as L
 
     db = _query_albo(L.FIRDAOUS)
     anno = date.today().year
-    assert "anno_nascita >= ?" in db.sql and (anno - 34) in db.valori
+    assert "anno_nascita >= ?" in db.sql and (anno - 44) in db.valori
     assert "anno_nascita <= ?" not in db.sql          # nessuna età minima
     assert "rete IN (" in db.sql
     for banca in L.BANCHE_CON_SPORTELLI:
@@ -730,3 +733,24 @@ def test_la_raccolta_passa_il_bersaglio_all_albo():
         R.cerca_apify, L._cerca_nellalbo = orig_cerca, orig_albo
     assert visti_bersagli and all(b is L.FIRDAOUS for b in visti_bersagli)
     assert ruoli and set(ruoli) <= set(L.RUOLI_FIRDAOUS)
+
+
+def test_entrambi_i_giri_cercano_nelle_province_intorno_a_roma():
+    """Richiesta di Stefano (25/11/2026): Roma e province intorno, per tutti e due."""
+    from services import loop_giornaliero as L
+    assert set(L.ZONA) == {"RM", "LT", "FR", "VT", "RI"}
+    for b in (L.SABIA, L.FIRDAOUS):
+        db = _query_albo(b)
+        assert "provincia IN (" in db.sql
+        assert all(p in db.valori for p in L.ZONA)
+        assert db.sql.count("?") == len(db.valori)
+
+
+def test_una_ricerca_al_giorno_nei_capoluoghi_intorno():
+    from services import loop_giornaliero as L
+    for g in range(800000, 800020):
+        citta = [L.citta_della_ricerca(g, i) for i in range(L.MAX_RICERCHE)]
+        assert citta[:-1] == ["Roma"] * (L.MAX_RICERCHE - 1), "Roma resta la fonte principale"
+        assert citta[-1] in L.CAPOLUOGHI_INTORNO
+    ultime = {L.citta_della_ricerca(g, L.MAX_RICERCHE - 1) for g in range(800000, 800008)}
+    assert ultime == set(L.CAPOLUOGHI_INTORNO), "in pochi giorni li gira tutti"

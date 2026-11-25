@@ -176,10 +176,10 @@
     </div>
     <div class="p-pannello-corpo">
         <p class="p-testo">
-            Ogni giorno cerca su LinkedIn consulenti con sede a Roma e tiene solo chi risulta anche
-            nell'albo, in provincia di <strong>{{ loop_conf.provincia }}</strong>, sopra i
+            Ogni giorno cerca su LinkedIn consulenti con sede a Roma e dintorni e tiene solo chi risulta anche
+            nell'albo, nelle province di <strong>{{ loop_conf.provincia }}</strong>, sopra i
             <strong>{{ loop_conf.eta }} anni</strong>, con un mandato e non già in Fideuram. Scarta chi
-            su LinkedIn non risulti lavorare a Roma, analizza i primi
+            su LinkedIn non risulti lavorare in zona, analizza i primi
             <strong>{{ loop_conf.al_giorno }}</strong> per propensione e porta in
             <strong>«Da valutare»</strong> chi prende almeno <strong>{{ loop_conf.soglia }}</strong>.
             Chi è già stato toccato non torna mai.
@@ -1072,7 +1072,7 @@ function seguiLoop() {
             if (!e) { stato.textContent = ''; return; }
             stato.innerHTML = e.ok
                 ? '<span style="color:#166534;">Esaminati ' + e.esaminati + ' · con LinkedIn ' + e.con_linkedin
-                  + ' · fuori Roma ' + (e.fuori_zona || 0)
+                  + ' · fuori zona ' + (e.fuori_zona || 0)
                   + ' · <strong>importati ' + e.importati + '</strong> · scartati '
                   + (e.scartati_punteggio + e.senza_linkedin) + '</span>'
                 : '<span style="color:#b45309;">' + esc(e.nota || 'Giro non eseguito') + '</span>';

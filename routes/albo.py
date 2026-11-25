@@ -172,7 +172,7 @@ def index():
                            da_chiamare=chi_chiamare.leggi(50),
                            loop_esecuzioni=loop_giornaliero.ultime_esecuzioni(10),
                            loop_attivo=loop_giornaliero.attivo(),
-                           loop_conf={"provincia": loop_giornaliero.PROVINCIA,
+                           loop_conf={"provincia": ", ".join(loop_giornaliero.ZONA),
                                       "eta": loop_giornaliero.ETA_MINIMA - 1,
                                       "soglia": loop_giornaliero.PUNTEGGIO_MINIMO,
                                       "al_giorno": loop_giornaliero.AL_GIORNO},

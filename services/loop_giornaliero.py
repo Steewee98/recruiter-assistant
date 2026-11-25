@@ -2,10 +2,12 @@
 Loop giornaliero: porta ogni giorno nuovi consulenti in «Da valutare».
 
 Cosa fa, una volta al giorno:
-  1. cerca su LinkedIn consulenti finanziari CON SEDE A ROMA (poche ricerche, a
-     ruoli e pagine ruotanti, così ogni giorno esce gente diversa);
+  1. cerca su LinkedIn consulenti finanziari CON SEDE A ROMA E NEL LAZIO (poche
+     ricerche, a ruoli, pagine e capoluoghi ruotanti, così ogni giorno esce
+     gente diversa);
   2. incrocia i profili trovati con l'albo OCF: tiene solo chi risulta iscritto,
-     in provincia di Roma, sopra i 30 anni, con un mandato e non già in Fideuram;
+     in provincia di Roma o in una delle province intorno (ZONA), sopra i 30
+     anni, con un mandato e non del nostro gruppo;
   3. ordina i superstiti per propensione al cambio e scarta chi è già stato
      lavorato;
   4. lancia l'analisi AI sui primi AL_GIORNO;
@@ -35,9 +37,9 @@ Tre vincoli che hanno guidato il progetto:
   scarti: senza profilo LinkedIn, o con punteggio basso. Altrimenti domani si
   ripagherebbe la stessa ricerca per riottenere lo stesso "no".
 
-• ROMA DEVE RISULTARE DA ENTRAMBE LE FONTI. L'albo dà il domicilio eletto (di
+• LA ZONA DEVE RISULTARE DA ENTRAMBE LE FONTI. L'albo dà il domicilio eletto (di
   norma la residenza), non l'ufficio: da solo non basta a dire che uno lavora a
-  Roma. Quindi la sede dichiarata su LinkedIn deve confermarlo, altrimenti il
+  Roma o nel Lazio (ZONA). Quindi la sede dichiarata su LinkedIn deve confermarlo, altrimenti il
   candidato viene scartato. Chi non scrive nessuna sede viene scartato anch'esso:
   in un'automazione l'assenza di prova non può valere come prova.
 
@@ -60,7 +62,13 @@ from database import get_db
 logger = logging.getLogger(__name__)
 
 # ── Criteri richiesti ────────────────────────────────────────────────────────
-PROVINCIA = "RM"
+# Dal 25/11/2026 la zona non è più solo la provincia di Roma ma anche le
+# province che le stanno intorno (richiesta di Stefano, per entrambi i giri):
+# sono le altre quattro del Lazio. Bacino dell'albo fuori dal gruppo: RM 2412,
+# LT 217, FR 158, VT 97, RI 33.
+ZONA = ("RM", "LT", "FR", "VT", "RI")
+# Capoluoghi in cui cercare su LinkedIn oltre a Roma (una ricerca al giorno).
+CAPOLUOGHI_INTORNO = ["Latina", "Frosinone", "Viterbo", "Rieti"]
 ETA_MINIMA = 31          # "sopra i 30 anni"
 PUNTEGGIO_MINIMO = 7     # entra in «Da valutare» da 7 in su
 AL_GIORNO = 10
@@ -138,38 +146,41 @@ class Bersaglio:
 
 SABIA = Bersaglio(
     codice="sabia", gestore="", ruoli=tuple(RUOLI_LINKEDIN),
-    eta_minima=ETA_MINIMA, chi="nell'albo di Roma sopra i 30 anni",
+    eta_minima=ETA_MINIMA, chi="nell'albo di Roma e dintorni sopra i 30 anni",
 )
 FIRDAOUS = Bersaglio(
     codice="firdaous", gestore="Firdaous Filahi", ruoli=tuple(RUOLI_FIRDAOUS),
-    eta_massima=34, banche=BANCHE_CON_SPORTELLI, lucchetto=LUCCHETTO_LOOP + 1,
-    chi="nell'albo di Roma, sotto i 35 anni e con mandato di una banca",
+    # Era 34: il primo giro (25/11) ha trovato 0 under 35 abilitati in banca su
+    # 87 profili; fino a 44 anni il bacino a Roma passa da ~70 a ~160 persone.
+    eta_massima=44, banche=BANCHE_CON_SPORTELLI, lucchetto=LUCCHETTO_LOOP + 1,
+    chi="nell'albo di Roma e dintorni, sotto i 45 anni e con mandato di una banca",
 )
 BERSAGLI = {b.codice: b for b in (SABIA, FIRDAOUS)}
 
 
-_comuni_rm = {"roma", "rome"}
+_NOMI_ZONA = {"roma", "rome", "lazio", "latium"}
+_comuni_rm = set(_NOMI_ZONA)
 
 
 def _comuni_provincia() -> set:
     """
-    Nomi dei comuni della provincia operativa, dal nostro stesso albo.
+    Nomi dei comuni della zona (Roma e province intorno), dal nostro stesso albo.
     Servono a riconoscere una sede LinkedIn come «area di Roma» anche quando è
     scritta col nome del comune (Fiumicino, Guidonia, Frascati…).
     """
     global _comuni_rm
-    if len(_comuni_rm) > 2:
+    if len(_comuni_rm) > len(_NOMI_ZONA):
         return _comuni_rm
     try:
         db = get_db()
         righe = db.execute(
-            "SELECT DISTINCT comune FROM ocf_iscritti WHERE provincia = ? AND COALESCE(comune,'') <> ''",
-            (PROVINCIA,)).fetchall()
+            f"SELECT DISTINCT comune FROM ocf_iscritti WHERE provincia IN ({','.join(['?'] * len(ZONA))})"
+            " AND COALESCE(comune,'') <> ''", ZONA).fetchall()
         db.close()
         _comuni_rm = _comuni_rm | {p for r in righe
                                    for p in _pezzi_sede(r["comune"] or "")}
     except Exception as e:  # pragma: no cover
-        logger.warning("Comuni di %s non leggibili: %s", PROVINCIA, e)
+        logger.warning("Comuni di %s non leggibili: %s", ",".join(ZONA), e)
     return _comuni_rm
 
 
@@ -201,7 +212,9 @@ def _pezzi_sede(location: str) -> list:
 
 def lavora_a_roma(location: str) -> bool:
     """
-    True se la sede dichiarata su LinkedIn è Roma o un comune della sua provincia.
+    True se la sede dichiarata su LinkedIn è Roma, il Lazio o un comune delle
+    province della ZONA (il nome resta per compatibilità: dal 25/11 la zona
+    coincide con il Lazio, quindi anche «Lazio, Italia» da solo basta).
 
     Il confronto è per COMPONENTE INTERA, non per sottostringa. Cercare "roma"
     dentro il testo sembrava innocuo e invece faceva passare mezza Italia:
@@ -223,7 +236,7 @@ def lavora_a_roma(location: str) -> bool:
     if len(pezzi) > 1 and ultimo not in paesi_ok and ultimo in _PAESI_NOTI:
         return False
 
-    ammessi = {"roma", "rome"} | _comuni_provincia()
+    ammessi = _NOMI_ZONA | _comuni_provincia()
     return any(p in ammessi for p in pezzi)
 
 
@@ -441,7 +454,7 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool,
         if not lavora_a_roma(sede):
             esito["fuori_zona"] += 1
             albo_ocf.registra_dossier(p, linkedin_url=li.get("linkedin", ""), esito="fuori_zona")
-            esito["dettaglio"].append({"nome": p["nome_completo"], "esito": "fuori Roma",
+            esito["dettaglio"].append({"nome": p["nome_completo"], "esito": "fuori zona",
                                        "motivo": f"su LinkedIn risulta «{sede or 'nessuna sede'}»"})
             continue
 
@@ -520,6 +533,17 @@ def ricerche_del_giorno(giorno: int, ruoli=None) -> list:
     return [combinazioni[(inizio + t) % len(combinazioni)] for t in range(MAX_RICERCHE)]
 
 
+def citta_della_ricerca(giorno: int, indice: int) -> str:
+    """
+    Dove fare la ricerca numero `indice` del giorno: le prime a Roma, l'ultima
+    in un capoluogo intorno, a rotazione. Così la spesa resta MAX_RICERCHE al
+    giorno e Roma, che ha quasi tutto il bacino, resta la fonte principale.
+    """
+    if indice < MAX_RICERCHE - 1:
+        return "Roma"
+    return CAPOLUOGHI_INTORNO[giorno % len(CAPOLUOGHI_INTORNO)]
+
+
 def _raccogli_da_linkedin(quanti: int, bersaglio: Bersaglio = SABIA):
     """
     Cerca su LinkedIn, con i ruoli del bersaglio, persone con sede a Roma e
@@ -538,11 +562,14 @@ def _raccogli_da_linkedin(quanti: int, bersaglio: Bersaglio = SABIA):
     candidati, visti, ricerche = [], 0, 0
     gia_presi, errori = set(), []
 
-    for ruolo, pagina in ricerche_del_giorno(giorno, bersaglio.ruoli):
+    for i, (ruolo, pagina) in enumerate(ricerche_del_giorno(giorno, bersaglio.ruoli)):
         if len(candidati) >= quanti:
             break
+        citta = citta_della_ricerca(giorno, i)
+        if citta != "Roma":
+            pagina = 1      # nei capoluoghi piccoli le pagine oltre la prima sono vuote
         items, errore = cerca_apify(
-            ruolo=ruolo, citta="Roma", max_items=PROFILI_PER_RICERCA,
+            ruolo=ruolo, citta=citta, max_items=PROFILI_PER_RICERCA,
             num_pagine=PAGINE_PER_RICERCA, start_page=pagina,
             max_wait=120, modalita="Short",
         )
@@ -578,7 +605,7 @@ def _raccogli_da_linkedin(quanti: int, bersaglio: Bersaglio = SABIA):
 def _cerca_nellalbo(nome: str, cognome: str, bersaglio: Bersaglio = SABIA):
     """
     Cerca il nominativo nell'albo con i criteri del bersaglio: provincia
-    operativa, età nei limiti, con mandato (per Firdaous: di una banca con
+    nella ZONA, età nei limiti, con mandato (per Firdaous: di una banca con
     sportelli), mai del nostro gruppo (Fideuram, Intesa Sanpaolo), non già
     lavorato né in pipeline.
     Ritorna la riga pronta all'uso oppure None.
@@ -589,7 +616,7 @@ def _cerca_nellalbo(nome: str, cognome: str, bersaglio: Bersaglio = SABIA):
     anno = date.today().year
     from services.albo_ocf import fuori_dal_gruppo
     fuori, gruppo = fuori_dal_gruppo()
-    filtri, valori = [], [PROVINCIA, *gruppo, nome, cognome]
+    filtri, valori = [], [*ZONA, *gruppo, nome, cognome]
     if bersaglio.eta_minima:
         filtri.append("AND anno_nascita <= ?")      # almeno eta_minima anni
         valori.append(anno - bersaglio.eta_minima)
@@ -605,7 +632,7 @@ def _cerca_nellalbo(nome: str, cognome: str, bersaglio: Bersaglio = SABIA):
         r = db.execute(f"""
             SELECT chiave, nome, cognome, anno_nascita, comune, provincia, rete, n_cambi
               FROM ocf_iscritti
-             WHERE attivo = TRUE AND provincia = ? AND COALESCE(rete,'') <> '' AND {fuori}
+             WHERE attivo = TRUE AND provincia IN ({','.join(['?'] * len(ZONA))}) AND COALESCE(rete,'') <> '' AND {fuori}
                AND LOWER(nome) = LOWER(?) AND LOWER(cognome) = LOWER(?)
                AND anno_nascita IS NOT NULL {' '.join(filtri)}
                AND chiave NOT IN (SELECT chiave FROM ocf_dossier)
