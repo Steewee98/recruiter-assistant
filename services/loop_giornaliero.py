@@ -631,6 +631,17 @@ def _cerca_nellalbo(nome: str, cognome: str, bersaglio: Bersaglio = SABIA):
         banche = sorted(bersaglio.banche)
         filtri.append(f"AND rete IN ({','.join(['?'] * len(banche))})")
         valori.extend(banche)
+    # Chi è già stato toccato non torna, TRANNE chi un altro giro ha scartato
+    # con un voto che a questo bersaglio basterebbe (Sabia scarta i 6, a
+    # Firdaous vanno bene): viene rianalizzato una volta con il profilo giusto.
+    # Il dossier si aggiorna col nuovo voto, quindi non si ripete.
+    valori.append(bersaglio.punteggio_minimo)
+    # Omonimi: dal profilo LinkedIn sappiamo solo nome e cognome. Se nella zona
+    # l'albo ha più persone con lo stesso nome, non si sa quale sia: si salta.
+    # Prima si prendeva la prima che passava i filtri (LIMIT 1), e allargando la
+    # zona (25/11) un profilo di Roma veniva attribuito a un omonimo di Latina
+    # del 1960 con un'altra rete: età e mandato sbagliati nell'analisi.
+    valori.extend([*ZONA, nome, cognome])
     db = get_db()
     try:
         r = db.execute(f"""
@@ -639,7 +650,12 @@ def _cerca_nellalbo(nome: str, cognome: str, bersaglio: Bersaglio = SABIA):
              WHERE attivo = TRUE AND provincia IN ({','.join(['?'] * len(ZONA))}) AND COALESCE(rete,'') <> '' AND {fuori}
                AND LOWER(nome) = LOWER(?) AND LOWER(cognome) = LOWER(?)
                AND anno_nascita IS NOT NULL {' '.join(filtri)}
-               AND chiave NOT IN (SELECT chiave FROM ocf_dossier)
+               AND chiave NOT IN (SELECT chiave FROM ocf_dossier
+                                   WHERE NOT (esito = 'scartato_punteggio'
+                                              AND COALESCE(punteggio, 0) >= ?))
+               AND (SELECT COUNT(*) FROM ocf_iscritti o
+                     WHERE o.attivo = TRUE AND o.provincia IN ({','.join(['?'] * len(ZONA))})
+                       AND LOWER(o.nome) = LOWER(?) AND LOWER(o.cognome) = LOWER(?)) = 1
                AND NOT EXISTS (SELECT 1 FROM candidati c
                                 WHERE LOWER(c.nome) = LOWER(ocf_iscritti.nome)
                                   AND LOWER(c.cognome) = LOWER(ocf_iscritti.cognome))

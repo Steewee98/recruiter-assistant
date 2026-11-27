@@ -601,29 +601,6 @@ def test_apify_legge_tutti_i_profili_chiesti_e_la_chiave_non_va_nell_indirizzo()
         assert kw["headers"]["Authorization"] == "Bearer CHIAVE-SEGRETA"
 
 
-if __name__ == "__main__":
-    import types
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
-    import logging
-    logging.getLogger("database").setLevel(logging.ERROR)
-    logging.getLogger("services.loop_giornaliero").setLevel(logging.ERROR)
-
-    passati, falliti = 0, 0
-    for nome, fn in sorted(globals().items()):
-        if not (nome.startswith("test_") and isinstance(fn, types.FunctionType)):
-            continue
-        try:
-            fn()
-            print(f"  ✓ {nome}")
-            passati += 1
-        except Exception as e:
-            print(f"  ✗ {nome}: {type(e).__name__}: {e}")
-            falliti += 1
-    print(f"\n{passati} passati, {falliti} falliti")
-    sys.exit(1 if falliti else 0)
-
-
 # ── Giro di Firdaous (dal 25/11/2026) ────────────────────────────────────────
 # Prove senza database: controllano i criteri, non i dati.
 
@@ -761,3 +738,43 @@ def test_firdaous_entra_da_6_sabia_resta_a_7():
     from services import loop_giornaliero as L
     assert L.FIRDAOUS.punteggio_minimo == 6
     assert L.SABIA.punteggio_minimo == L.PUNTEGGIO_MINIMO == 7
+
+
+def test_firdaous_rivede_i_6_scartati_da_sabia():
+    from services import loop_giornaliero as L
+    for b, soglia in ((L.FIRDAOUS, 6), (L.SABIA, 7)):
+        db = _query_albo(b)
+        assert "esito = 'scartato_punteggio'" in db.sql and "COALESCE(punteggio, 0) >= ?" in db.sql
+        assert db.valori[-(len(L.ZONA) + 3)] == soglia
+        assert db.sql.count("?") == len(db.valori)
+
+
+def test_gli_omonimi_nella_zona_si_saltano():
+    from services import loop_giornaliero as L
+    db = _query_albo(L.FIRDAOUS)
+    assert "SELECT COUNT(*) FROM ocf_iscritti o" in db.sql and ") = 1" in db.sql
+    assert db.valori[-2:] == ["Anna", "Rossi"]
+    assert db.sql.count("?") == len(db.valori)
+
+
+if __name__ == "__main__":
+    import types
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+    import logging
+    logging.getLogger("database").setLevel(logging.ERROR)
+    logging.getLogger("services.loop_giornaliero").setLevel(logging.ERROR)
+
+    passati, falliti = 0, 0
+    for nome, fn in sorted(globals().items()):
+        if not (nome.startswith("test_") and isinstance(fn, types.FunctionType)):
+            continue
+        try:
+            fn()
+            print(f"  ✓ {nome}")
+            passati += 1
+        except Exception as e:
+            print(f"  ✗ {nome}: {type(e).__name__}: {e}")
+            falliti += 1
+    print(f"\n{passati} passati, {falliti} falliti")
+    sys.exit(1 if falliti else 0)

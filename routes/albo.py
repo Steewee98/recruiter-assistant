@@ -514,8 +514,15 @@ def loop_adesso():
             # Entrambi i giri, uno dopo l'altro. A schermo resta l'esito di
             # quello di Salvatore (il riquadro ne mostra uno); quello di
             # Firdaous finisce nello storico come ogni giro.
-            esiti = [loop_giornaliero.esegui(ignora_budget=forza, forzato=True, bersaglio=b)
-                     for b in loop_giornaliero.BERSAGLI.values()]
+            # Ogni giro ha il suo try: un guasto in quello di Salvatore non
+            # deve impedire quello di Firdaous.
+            esiti = []
+            for b in loop_giornaliero.BERSAGLI.values():
+                try:
+                    esiti.append(loop_giornaliero.esegui(ignora_budget=forza, forzato=True, bersaglio=b))
+                except Exception as e:
+                    log.error("Loop manuale (%s) fallito: %s", b.codice, e, exc_info=True)
+                    esiti.append({"ok": False, "nota": f"{b.codice}: {e}"})
             _loop_stato["esito"] = esiti[0]
         except Exception as e:  # pragma: no cover
             log.error("Loop manuale fallito: %s", e, exc_info=True)
