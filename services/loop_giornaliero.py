@@ -539,11 +539,16 @@ def ricerche_del_giorno(giorno: int, ruoli=None) -> list:
 
 def citta_della_ricerca(giorno: int, indice: int) -> str:
     """
-    Dove fare la ricerca numero `indice` del giorno: le prime a Roma, l'ultima
-    in un capoluogo intorno, a rotazione. Così la spesa resta MAX_RICERCHE al
-    giorno e Roma, che ha quasi tutto il bacino, resta la fonte principale.
+    Dove fare la ricerca numero `indice` del giorno: una sola fuori Roma, in un
+    capoluogo intorno a rotazione, le altre a Roma. Così la spesa resta
+    MAX_RICERCHE al giorno e Roma, che ha quasi tutto il bacino, resta la fonte
+    principale.
+
+    La ricerca che va fuori Roma cambia posizione ogni giorno. Se fosse sempre
+    l'ultima, con 8 ruoli (Firdaous) e 4 ricerche al giorno toccherebbe sempre
+    agli stessi due ruoli, che a Roma non si cercherebbero mai.
     """
-    if indice < MAX_RICERCHE - 1:
+    if indice != giorno % MAX_RICERCHE:
         return "Roma"
     return CAPOLUOGHI_INTORNO[giorno % len(CAPOLUOGHI_INTORNO)]
 

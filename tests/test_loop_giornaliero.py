@@ -725,12 +725,23 @@ def test_entrambi_i_giri_cercano_nelle_province_intorno_a_roma():
 
 def test_una_ricerca_al_giorno_nei_capoluoghi_intorno():
     from services import loop_giornaliero as L
+    fuori = set()
     for g in range(800000, 800020):
         citta = [L.citta_della_ricerca(g, i) for i in range(L.MAX_RICERCHE)]
-        assert citta[:-1] == ["Roma"] * (L.MAX_RICERCHE - 1), "Roma resta la fonte principale"
-        assert citta[-1] in L.CAPOLUOGHI_INTORNO
-    ultime = {L.citta_della_ricerca(g, L.MAX_RICERCHE - 1) for g in range(800000, 800008)}
-    assert ultime == set(L.CAPOLUOGHI_INTORNO), "in pochi giorni li gira tutti"
+        assert citta.count("Roma") == L.MAX_RICERCHE - 1, "Roma resta la fonte principale"
+        fuori |= {c for c in citta if c != "Roma"}
+    assert fuori == set(L.CAPOLUOGHI_INTORNO), "in pochi giorni li gira tutti"
+
+
+def test_ogni_ruolo_si_cerca_anche_a_roma():
+    """Revisione 27/11: con l'ultima ricerca sempre fuori Roma, due ruoli di
+    Firdaous non si cercavano mai a Roma."""
+    from services import loop_giornaliero as L
+    for b in (L.SABIA, L.FIRDAOUS):
+        a_roma = {r for g in range(800000, 800100)
+                  for i, (r, _) in enumerate(L.ricerche_del_giorno(g, b.ruoli))
+                  if L.citta_della_ricerca(g, i) == "Roma"}
+        assert a_roma == set(b.ruoli), (b.codice, set(b.ruoli) - a_roma)
 
 
 def test_firdaous_entra_da_6_sabia_resta_a_7():
