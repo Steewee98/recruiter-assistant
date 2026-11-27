@@ -175,6 +175,7 @@ def index():
                            loop_conf={"provincia": ", ".join(loop_giornaliero.ZONA),
                                       "eta": loop_giornaliero.ETA_MINIMA - 1,
                                       "soglia": loop_giornaliero.PUNTEGGIO_MINIMO,
+                                      "soglia_firdaous": loop_giornaliero.FIRDAOUS.punteggio_minimo,
                                       "al_giorno": loop_giornaliero.AL_GIORNO},
                            provincia=albo_ocf.PROVINCIA_OPERATIVA,
                            sync_in_corso=_sync_stato["in_corso"])

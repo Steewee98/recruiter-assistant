@@ -754,3 +754,10 @@ def test_una_ricerca_al_giorno_nei_capoluoghi_intorno():
         assert citta[-1] in L.CAPOLUOGHI_INTORNO
     ultime = {L.citta_della_ricerca(g, L.MAX_RICERCHE - 1) for g in range(800000, 800008)}
     assert ultime == set(L.CAPOLUOGHI_INTORNO), "in pochi giorni li gira tutti"
+
+
+def test_firdaous_entra_da_6_sabia_resta_a_7():
+    """Stefano, 27/11/2026: per Firdaous vanno bene anche i voti 6."""
+    from services import loop_giornaliero as L
+    assert L.FIRDAOUS.punteggio_minimo == 6
+    assert L.SABIA.punteggio_minimo == L.PUNTEGGIO_MINIMO == 7

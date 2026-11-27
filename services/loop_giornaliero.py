@@ -11,7 +11,7 @@ Cosa fa, una volta al giorno:
   3. ordina i superstiti per propensione al cambio e scarta chi è già stato
      lavorato;
   4. lancia l'analisi AI sui primi AL_GIORNO;
-  5. chi prende almeno PUNTEGGIO_MINIMO entra in pipeline come «Da valutare».
+  5. chi prende almeno il punteggio minimo del bersaglio (7, per Firdaous 6) entra in pipeline come «Da valutare».
 
 ⚠️ PERCHÉ IL FLUSSO PARTE DA LINKEDIN E NON DALL'ALBO. La prima versione faceva
 il contrario: prendeva i più propensi dall'albo e ne cercava il profilo LinkedIn
@@ -142,6 +142,7 @@ class Bersaglio:
     banche: frozenset = frozenset()   # vuoto = qualunque mandante tranne Fideuram
     lucchetto: int = LUCCHETTO_LOOP
     chi: str = ""           # per la nota «nessuno nuovo che …»
+    punteggio_minimo: int = PUNTEGGIO_MINIMO   # da quanto si entra in «Da valutare»
 
 
 SABIA = Bersaglio(
@@ -153,6 +154,9 @@ FIRDAOUS = Bersaglio(
     # Era 34: il primo giro (25/11) ha trovato 0 under 35 abilitati in banca su
     # 87 profili; fino a 44 anni il bacino a Roma passa da ~70 a ~160 persone.
     eta_massima=44, banche=BANCHE_CON_SPORTELLI, lucchetto=LUCCHETTO_LOOP + 1,
+    # 6 invece di 7 (Stefano, 27/11/2026): dopo tre notti Firdaous aveva un solo
+    # contatto; il 27/11 l'unico profilo trovato ha preso 5.
+    punteggio_minimo=6,
     chi="nell'albo di Roma e dintorni, sotto i 45 anni e con mandato di una banca",
 )
 BERSAGLI = {b.codice: b for b in (SABIA, FIRDAOUS)}
@@ -478,7 +482,7 @@ def _esegui_protetto(esito: dict, limite: int, ignora_budget: bool,
         punteggio = analisi.get("punteggio")
         url = li.get("linkedin", "")
 
-        if not isinstance(punteggio, int) or punteggio < PUNTEGGIO_MINIMO:
+        if not isinstance(punteggio, int) or punteggio < bersaglio.punteggio_minimo:
             esito["scartati_punteggio"] += 1
             albo_ocf.registra_dossier(p, linkedin_url=url, esito="scartato_punteggio",
                                       punteggio=punteggio if isinstance(punteggio, int) else None)
