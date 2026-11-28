@@ -143,11 +143,16 @@ class Bersaglio:
     lucchetto: int = LUCCHETTO_LOOP
     chi: str = ""           # per la nota «nessuno nuovo che …»
     punteggio_minimo: int = PUNTEGGIO_MINIMO   # da quanto si entra in «Da valutare»
+    acceso: bool = True     # False = il giro non parte, né di notte né a mano
 
 
 SABIA = Bersaglio(
     codice="sabia", gestore="", ruoli=tuple(RUOLI_LINKEDIN),
     eta_minima=ETA_MINIMA, chi="nell'albo di Roma e dintorni sopra i 30 anni",
+    # Spento il 28/11/2026 su richiesta di Stefano: per Salvatore i nomi
+    # arrivano (10 su 10 stanotte), per Firdaous no. Si spende solo per lei.
+    # Per riaccenderlo basta togliere questa riga.
+    acceso=False,
 )
 FIRDAOUS = Bersaglio(
     codice="firdaous", gestore="Firdaous Filahi", ruoli=tuple(RUOLI_FIRDAOUS),
@@ -160,6 +165,11 @@ FIRDAOUS = Bersaglio(
     chi="nell'albo di Roma e dintorni, sotto i 45 anni e con mandato di una banca",
 )
 BERSAGLI = {b.codice: b for b in (SABIA, FIRDAOUS)}
+
+
+def bersagli_accesi() -> list:
+    """I giri che oggi devono partire (vedi Bersaglio.acceso)."""
+    return [b for b in BERSAGLI.values() if b.acceso]
 
 
 _NOMI_ZONA = {"roma", "rome", "lazio", "latium"}

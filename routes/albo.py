@@ -118,7 +118,7 @@ def _pianificatore():
 
         # Giri giornalieri: portano nuovi nomi in «Da valutare», uno per
         # Salvatore e uno per Firdaous. Uno che fallisce non ferma l'altro.
-        for bersaglio in loop_giornaliero.BERSAGLI.values():
+        for bersaglio in loop_giornaliero.bersagli_accesi():
             try:
                 if (os.environ.get("LOOP_GIORNALIERO", "1") == "1"
                         and loop_giornaliero.attivo()
@@ -517,13 +517,13 @@ def loop_adesso():
             # Ogni giro ha il suo try: un guasto in quello di Salvatore non
             # deve impedire quello di Firdaous.
             esiti = []
-            for b in loop_giornaliero.BERSAGLI.values():
+            for b in loop_giornaliero.bersagli_accesi():
                 try:
                     esiti.append(loop_giornaliero.esegui(ignora_budget=forza, forzato=True, bersaglio=b))
                 except Exception as e:
                     log.error("Loop manuale (%s) fallito: %s", b.codice, e, exc_info=True)
                     esiti.append({"ok": False, "nota": f"{b.codice}: {e}"})
-            _loop_stato["esito"] = esiti[0]
+            _loop_stato["esito"] = esiti[0] if esiti else {"ok": False, "nota": "Nessun giro acceso."}
         except Exception as e:  # pragma: no cover
             log.error("Loop manuale fallito: %s", e, exc_info=True)
             _loop_stato["esito"] = {"ok": False, "nota": str(e)}

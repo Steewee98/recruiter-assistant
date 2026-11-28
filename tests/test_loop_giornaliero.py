@@ -768,6 +768,12 @@ def test_gli_omonimi_nella_zona_si_saltano():
     assert db.sql.count("?") == len(db.valori)
 
 
+def test_il_giro_di_sabia_e_spento_quello_di_firdaous_no():
+    """Stefano, 28/11/2026: si cerca solo per Firdaous."""
+    from services import loop_giornaliero as L
+    assert [b.codice for b in L.bersagli_accesi()] == ["firdaous"]
+
+
 if __name__ == "__main__":
     import types
     from dotenv import load_dotenv
