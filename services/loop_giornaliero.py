@@ -155,14 +155,20 @@ SABIA = Bersaglio(
     acceso=False,
 )
 FIRDAOUS = Bersaglio(
-    codice="firdaous", gestore="Firdaous Filahi", ruoli=tuple(RUOLI_FIRDAOUS),
-    # Era 34: il primo giro (25/11) ha trovato 0 under 35 abilitati in banca su
-    # 87 profili; fino a 44 anni il bacino a Roma passa da ~70 a ~160 persone.
-    eta_massima=44, banche=BANCHE_CON_SPORTELLI, lucchetto=LUCCHETTO_LOOP + 1,
+    # Dal 28/11/2026 (Stefano: «basta che abbiano l'OCF e siano di Roma e
+    # provincia»): niente più limite d'età né obbligo di mandato bancario.
+    # Con quei filtri (prima under 35, poi under 45, sempre in banca) il giro ha
+    # portato 0 contatti in quattro notti, mentre con i criteri larghi il giro di
+    # Salvatore ne portava ~10 a notte. Il giro di Salvatore è spento: i ruoli
+    # che rendevano li usa adesso questo, insieme a quelli di filiale.
+    # Restano: iscritto all'albo con mandato, zona (ZONA), fuori dal gruppo.
+    codice="firdaous", gestore="Firdaous Filahi",
+    ruoli=tuple(dict.fromkeys(RUOLI_LINKEDIN + RUOLI_FIRDAOUS)),
+    lucchetto=LUCCHETTO_LOOP + 1,
     # 6 invece di 7 (Stefano, 27/11/2026): dopo tre notti Firdaous aveva un solo
     # contatto; il 27/11 l'unico profilo trovato ha preso 5.
     punteggio_minimo=6,
-    chi="nell'albo di Roma e dintorni, sotto i 45 anni e con mandato di una banca",
+    chi="nell'albo di Roma e dintorni, con un mandato",
 )
 BERSAGLI = {b.codice: b for b in (SABIA, FIRDAOUS)}
 
@@ -692,9 +698,8 @@ def albo_rete_propria() -> str:
 
 
 def _tipo(profilo: dict, bersaglio: Bersaglio) -> str:
-    """Profilo di ricerca: B = under 35 (sempre B nel giro di Firdaous)."""
-    if bersaglio.gestore == "Firdaous Filahi":
-        return "B"
+    """Profilo di ricerca: B = under 35, A = gli altri (dal 28/11 anche per Firdaous,
+    che ora riceve consulenti di ogni età)."""
     eta = profilo.get("eta") or 0
     return "B" if eta and eta < 35 else "A"
 

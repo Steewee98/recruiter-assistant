@@ -632,17 +632,15 @@ def _query_albo(bersaglio):
     return db
 
 
-def test_firdaous_cerca_solo_under_45_con_mandato_di_una_banca():
-    from datetime import date
+def test_firdaous_basta_albo_con_mandato_e_zona():
+    """Stefano, 28/11/2026: «basta che abbiano l'OCF e siano di Roma e provincia»."""
     from services import loop_giornaliero as L
 
     db = _query_albo(L.FIRDAOUS)
-    anno = date.today().year
-    assert "anno_nascita >= ?" in db.sql and (anno - 44) in db.valori
-    assert "anno_nascita <= ?" not in db.sql          # nessuna età minima
-    assert "rete IN (" in db.sql
-    for banca in L.BANCHE_CON_SPORTELLI:
-        assert banca in db.valori
+    assert "attivo = TRUE" in db.sql and "COALESCE(rete,'') <> ''" in db.sql   # iscritto, con mandato
+    assert "provincia IN (" in db.sql and all(p in db.valori for p in L.ZONA)
+    assert "anno_nascita >= ?" not in db.sql and "anno_nascita <= ?" not in db.sql
+    assert "rete IN (" not in db.sql
     assert db.sql.count("?") == len(db.valori)        # segnaposto e valori allineati
 
 
@@ -674,15 +672,16 @@ def test_il_giro_di_sabia_non_cambia():
 def test_le_ricerche_di_firdaous_usano_solo_i_suoi_ruoli():
     from services import loop_giornaliero as L
     viste = {r for g in range(800000, 800050) for r, _ in L.ricerche_del_giorno(g, L.FIRDAOUS.ruoli)}
-    assert viste == set(L.RUOLI_FIRDAOUS)
+    assert viste == set(L.RUOLI_FIRDAOUS) | set(L.RUOLI_LINKEDIN)
+    assert len(L.FIRDAOUS.ruoli) == len(set(L.FIRDAOUS.ruoli)), "niente ruoli doppi"
 
 
 def test_gestore_e_profilo_per_bersaglio():
     from services import loop_giornaliero as L
-    # Firdaous: sempre profilo B e sempre sua, anche se l'età mancasse
-    for eta in (None, 25, 34):
+    # Firdaous: sempre sua, a qualunque età; il profilo d'analisi segue l'età
+    for eta, tipo in ((None, "A"), (25, "B"), (34, "B"), (50, "A")):
         t = L._tipo({"eta": eta}, L.FIRDAOUS)
-        assert t == "B" and L._gestore(t, L.FIRDAOUS) == "Firdaous Filahi"
+        assert t == tipo and L._gestore(t, L.FIRDAOUS) == "Firdaous Filahi"
     # Sabia: la regola di sempre, decide l'età
     assert L._gestore(L._tipo({"eta": 50}, L.SABIA), L.SABIA) == "Salvatore Sabia"
     assert L._gestore(L._tipo({"eta": 32}, L.SABIA), L.SABIA) == "Firdaous Filahi"
@@ -709,7 +708,7 @@ def test_la_raccolta_passa_il_bersaglio_all_albo():
     finally:
         R.cerca_apify, L._cerca_nellalbo = orig_cerca, orig_albo
     assert visti_bersagli and all(b is L.FIRDAOUS for b in visti_bersagli)
-    assert ruoli and set(ruoli) <= set(L.RUOLI_FIRDAOUS)
+    assert ruoli and set(ruoli) <= set(L.FIRDAOUS.ruoli)
 
 
 def test_entrambi_i_giri_cercano_nelle_province_intorno_a_roma():
